@@ -1,0 +1,90 @@
+
+> grime-guardians-hq@1.0.0 start
+> node src/index.js
+
+⚠️ High Level integration disabled by environment variable
+🎯 Initializing Dual-Channel Communication Monitor
+📱 Channel 1: Google Voice (612-584-9396) → Gmail
+📱 Channel 2: High Level (651-515-1478) → High Level API
+📅 Schedule Manager initialized with dual-channel monitoring
+📱 Monitoring: Google Voice (612-584-9396) + High Level (651-515-1478)
+📧 Initializing Email Communication Monitor
+📱 Channel 1: Google Voice (612-584-9396) → Gmail
+📱 Channel 2: High Level (651-515-1478) → API Monitoring
+[Express] Webhook server listening on port 3000
+[Express] POST endpoint: http://localhost:3000/webhook/highlevel-appointment
+Discord bot logged in as Ava#8003
+Ava agent is ready.
+Keith Enhanced agent is ready with full escalation and job scheduling.
+[Keith] Initializing job reminder system...
+[Keith] Checking for upcoming jobs to schedule reminders...
+📅 Schedule Manager agent is ready for intelligent schedule management.
+🎉 Maya agent is ready to spread positivity and motivation!
+💰 Zara agent is ready to calculate bonuses and track performance!
+[Zara] Next bonus calculation scheduled for: 6/15/2025, 6:00:00 PM
+🛡️ Nikolai agent is ready to enforce compliance and validate SOPs!
+[Nikolai] Loading SOP requirements from Notion...
+💰 Iris agent is ready to generate quotes and handle sales logic!
+📊 Jules agent is ready to analyze data and generate insights!
+🚀 Initializing email communication monitor...
+✅ Gmail API connected for Google Voice monitoring
+❌ High Level connection failed: getAllConversations is not a function
+❌ Failed to initialize communication monitor: getAllConversations is not a function
+❌ Failed to initialize communication monitoring
+✅ Gmail API connected for Google Voice monitoring
+⚠️ High Level integration disabled - skipping connection test
+✅ Email communication monitor initialized
+🚀 Starting email-based communication monitoring...
+📧 Checking Google Voice emails every 2 minutes
+📱 Checking High Level conversations every 5 minutes
+📧 Checking Google Voice emails...
+📱 Checking High Level conversations...
+❌ Error checking High Level conversations: getAllConversations is not a function
+🎯 Schedule request detected in Google Voice SMS from null
+@notionhq/client warn: request fail {
+  code: 'validation_error',
+  message: 'body failed validation. Fix one:\n' +
+    'body.properties.Client Phone.title should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.rich_text should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.number should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.url should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.select should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.multi_select should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.people should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.email should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.phone_number should be populated or `null`, instead was `""`.\n' +
+    'body.properties.Client Phone.date should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.checkbox should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.relation should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.files should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Phone.status should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Name.id should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Name.name should be defined, instead was `undefined`.\n' +
+    'body.properties.Client Name.start should be defined, instead was `undefined`.'
+}
+❌ Error logging to Notion: body failed validation. Fix one:
+body.properties.Client Phone.title should be defined, instead was `undefined`.
+body.properties.Client Phone.rich_text should be defined, instead was `undefined`.
+body.properties.Client Phone.number should be defined, instead was `undefined`.
+body.properties.Client Phone.url should be defined, instead was `undefined`.
+body.properties.Client Phone.select should be defined, instead was `undefined`.
+body.properties.Client Phone.multi_select should be defined, instead was `undefined`.
+body.properties.Client Phone.people should be defined, instead was `undefined`.
+body.properties.Client Phone.email should be defined, instead was `undefined`.
+body.properties.Client Phone.phone_number should be populated or `null`, instead was `""`.
+body.properties.Client Phone.date should be defined, instead was `undefined`.
+body.properties.Client Phone.checkbox should be defined, instead was `undefined`.
+body.properties.Client Phone.relation should be defined, instead was `undefined`.
+body.properties.Client Phone.files should be defined, instead was `undefined`.
+body.properties.Client Phone.status should be defined, instead was `undefined`.
+body.properties.Client Name.id should be defined, instead was `undefined`.
+body.properties.Client Name.name should be defined, instead was `undefined`.
+body.properties.Client Name.start should be defined, instead was `undefined`.
+📧 Processed 10 new Google Voice messages
+✅ Email communication monitoring started
+✅ Simple cost monitoring initialized
+✅ Cost monitoring started
+📧 Checking Google Voice emails...
+📧 Checking Google Voice emails...
+📱 Checking High Level conversations...
+❌ Error checking High Level conversations: getAllConversations is not a function

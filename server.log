@@ -1,0 +1,5 @@
+[Express] Webhook server listening on port 3000
+[Express] POST endpoint: http://localhost:3000/webhook/highlevel-appointment
+Discord bot logged in as Ava#8003
+Ava agent is ready.
+Keith agent is ready.

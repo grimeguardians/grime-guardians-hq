@@ -1,0 +1,324 @@
+{
+  "name": "Keith (Checkin Tracker Agent - Operations)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        360
+      ],
+      "id": "274d48ad-51a2-46e0-b85c-75acc935b65a"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "cleaner",
+              "value": "={{$json.cleanerName}}"
+            },
+            {
+              "name": "jobTime",
+              "value": "={{$json.jobTime}}"
+            },
+            {
+              "name": "jobId",
+              "value": "={{$json.jobId}}"
+            },
+            {
+              "name": "checkinChannel",
+              "value": "={{$json.checkinChannel}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Job Info",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        0,
+        360
+      ],
+      "id": "9a0a689d-7e59-4de4-9b31-60e791a13803"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "dateTime": [
+            {
+              "value1": "={{$json.jobTime}}",
+              "operation": "isBefore",
+              "value2": "={{(new Date(Date.now() - 5*60*1000)).toISOString()}}"
+            }
+          ]
+        }
+      },
+      "name": "Check If Late",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        220,
+        360
+      ],
+      "id": "dad4a60b-163f-4770-8a41-c82bdd6f0a4c"
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/v10/channels/{{$json.checkinChannel}}/messages",
+        "jsonParameters": true,
+        "options": {}
+      },
+      "name": "Ping Cleaner (Discord)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        420,
+        260
+      ],
+      "id": "fae67d55-00dd-403e-bb8e-8cedba60c239"
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "minutes"
+      },
+      "name": "Wait 10 mins",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        620,
+        260
+      ],
+      "id": "bcf52f6e-8d02-40c5-b611-ae003b44fd46",
+      "webhookId": "350c9604-c11c-403e-a78c-4ff4f04b4e0f"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "escalate"
+            },
+            {
+              "name": "reason",
+              "value": "Cleaner did not confirm after ping"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Escalation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        820,
+        260
+      ],
+      "id": "5524869a-3907-401d-9b4c-fcb1ba6f369d"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "all_good"
+            },
+            {
+              "name": "reason",
+              "value": "Cleaner checked in on time"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OK",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        420,
+        460
+      ],
+      "id": "aa987b6b-0283-41b6-b7aa-8bd270d626be"
+    },
+    {
+      "parameters": {
+        "resource": "database",
+        "databaseId": {
+          "__rl": true,
+          "value": "2088b5b8-ae51-80c8-9e0b-e8a62e38568d",
+          "mode": "list",
+          "cachedResultName": "Escalation Log",
+          "cachedResultUrl": "https://www.notion.so/2088b5b8ae5180c89e0be8a62e38568d"
+        }
+      },
+      "name": "Log Escalation to Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 1,
+      "position": [
+        1020,
+        260
+      ],
+      "id": "91b97e78-08bb-4863-9c8c-ba18d5f8d033",
+      "credentials": {
+        "notionApi": {
+          "id": "lab0wxCmGes9KCyE",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/v10/users/@me/messages",
+        "jsonParameters": true,
+        "options": {}
+      },
+      "name": "DM Brandon (Discord)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        260
+      ],
+      "id": "eb5f90be-6e24-487a-84de-220f2966c3bd"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Label output for downstream routing and escalation\nconst isLate = $node['Check If Late'].json[0].value;\nreturn [{\n  json: {\n    agent_id: 'keith_checkin',\n    task: isLate ? 'escalate_late_checkin' : 'log_on_time',\n    action_required: isLate ? 'notify_discord_and_log_notion' : 'log_notion',\n    confidence: 1,\n    cleaner: $node['Set Job Info'].json['cleaner'],\n    jobId: $node['Set Job Info'].json['jobId'],\n    jobTime: $node['Set Job Info'].json['jobTime'],\n    checkinChannel: $node['Set Job Info'].json['checkinChannel'],\n    status: isLate ? 'late' : 'on_time',\n    reason: isLate ? 'Cleaner did not confirm after ping' : 'Cleaner checked in on time'\n  }\n}];"
+      },
+      "name": "Label Output",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        460
+      ],
+      "id": "label-output-func"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Set Job Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Job Info": {
+      "main": [
+        [
+          {
+            "node": "Check If Late",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Late": {
+      "main": [
+        [
+          {
+            "node": "Ping Cleaner (Discord)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Cleaner (Discord)": {
+      "main": [
+        [
+          {
+            "node": "Wait 10 mins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10 mins": {
+      "main": [
+        [
+          {
+            "node": "Set Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Escalation": {
+      "main": [
+        [
+          {
+            "node": "Log Escalation to Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Escalation to Notion": {
+      "main": [
+        [
+          {
+            "node": "DM Brandon (Discord)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set OK": {
+      "main": [
+        [
+          {
+            "node": "Label Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DM Brandon (Discord)": {
+      "main": [
+        [
+          {
+            "node": "Label Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0f0189f8-1952-43a6-882a-555f9ba946c2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c66acccb2a5a37adb3c1559d18a3d2a5af2141797281a9ce02e9c7d5f4b7c38e"
+  },
+  "id": "hbYkOeg19dktONJv",
+  "tags": []
+}

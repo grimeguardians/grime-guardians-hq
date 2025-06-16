@@ -1,0 +1,374 @@
+{
+  "name": "COO Memory Stack",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "Title",
+              "value": "🧠 Ava (COO) Overview"
+            },
+            {
+              "name": "Content Summary",
+              "value": "Updated: Ava system orchestration clarified."
+            },
+            {
+              "name": "Last Updated",
+              "value": "2025-06-06T10:30:00.000Z"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c566751d-ca4c-44a7-877c-ce523ed7264e",
+      "name": "Set",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "2098b5b8-ae51-804c-8a79-c0b551f15e09",
+          "mode": "list",
+          "cachedResultName": "COO Knowledge Stack",
+          "cachedResultUrl": "https://www.notion.so/2098b5b8ae51804c8a79c0b551f15e09"
+        },
+        "filterType": "manual",
+        "filters": {
+          "conditions": [
+            {
+              "key": "Title|title",
+              "condition": "equals",
+              "titleValue": "={{ $('Set').item.json['Title'].trim() }}\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "48b5a106-f758-4267-a0c0-3b8f1df0dfe8",
+      "name": "Search Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        0
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "lab0wxCmGes9KCyE",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $items().length }}\n",
+              "operation": "larger"
+            }
+          ]
+        }
+      },
+      "id": "c920a6aa-5811-4459-8f5e-4117d4c256ec",
+      "name": "IF Page Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Search Page').first().json.id }}\n",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Content Summary|rich_text",
+              "textContent": "={{ $('Set').item.json['Content Summary'] }}"
+            },
+            {
+              "key": "Last Updated|date",
+              "date": "={{ $('Set').item.json['Last Updated'] }}",
+              "timezone": "America/Chicago"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bff460b3-1c87-4a03-9624-54f68bec7bc0",
+      "name": "Update Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -100
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "lab0wxCmGes9KCyE",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "2098b5b8-ae51-804c-8a79-c0b551f15e09",
+          "mode": "list",
+          "cachedResultName": "COO Knowledge Stack",
+          "cachedResultUrl": "https://www.notion.so/2098b5b8ae51804c8a79c0b551f15e09"
+        },
+        "options": {}
+      },
+      "id": "2efb1b19-7506-4cd1-b086-e7a29859ff41",
+      "name": "Create Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        200,
+        100
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "lab0wxCmGes9KCyE",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -580,
+        0
+      ],
+      "id": "1df6b7c8-7a47-4913-a302-53a8627cb014",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "content": "## Logic \nNeed to change the Notion Update Page node so that it updates page contents, not properties.",
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -200,
+        -200
+      ],
+      "typeVersion": 1,
+      "id": "8832de3e-d46d-45d6-8812-f83009843bf6",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare for Notion block update or creation\nconst exists = $node['IF Page Exists?'].json[0].value;\nreturn [{\n  json: {\n    agent_id: 'ava_coo',\n    task: exists ? 'update_page_content' : 'create_page',\n    action_required: exists ? 'update_notion_block' : 'create_notion_page',\n    confidence: 1,\n    page_id: exists ? $node['Search Page'].json[0].id : null,\n    block_id: exists ? $node['Search Page'].json[0].id : null,\n    new_content: $node['Set'].json['Content Summary'],\n    title: $node['Set'].json['Title'],\n    last_updated: $node['Set'].json['Last Updated']\n  }\n}];"
+      },
+      "id": "func-block-update",
+      "name": "Prepare Block Update",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.notion.com/v1/blocks/{{$json.block_id}}",
+        "method": "PATCH",
+        "jsonParameters": true,
+        "options": {},
+        "headers": {
+          "Authorization": "Bearer {{$env.NOTION_SECRET}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "{\n  \"paragraph\": {\n    \"rich_text\": [\n      {\n        \"type\": \"text\",\n        \"text\": {\n          \"content\": \"{{$json.new_content}}\"\n        }\n      }\n    ]\n  }\n}"
+      },
+      "id": "http-update-block",
+      "name": "Update Notion Block",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        400,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.notion.com/v1/pages",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "headers": {
+          "Authorization": "Bearer {{$env.NOTION_SECRET}}",
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "{\n  \"parent\": {\n    \"database_id\": \"2098b5b8-ae51-804c-8a79-c0b551f15e09\"\n  },\n  \"properties\": {\n    \"Title\": {\n      \"title\": [\n        {\n          \"text\": {\n            \"content\": \"{{$json.title}}\"\n          }\n        }\n      ]\n    },\n    \"Last Updated\": {\n      \"date\": {\n        \"start\": \"{{$json.last_updated}}\"\n      }\n    }\n  },\n  \"children\": [\n    {\n      \"object\": \"block\",\n      \"type\": \"paragraph\",\n      \"paragraph\": {\n        \"rich_text\": [\n          {\n            \"type\": \"text\",\n            \"text\": {\n              \"content\": \"{{$json.new_content}}\"\n            }\n          }\n        ]\n      }\n    }\n  ]\n}"
+      },
+      "id": "http-create-page",
+      "name": "Create Notion Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        400,
+        100
+      ]
+    }
+  ],
+  "pinData": {
+    "Set": [
+      {
+        "json": {
+          "Title": "🧠 Ava (COO) Overview",
+          "Content Summary": "Bookie dookie.",
+          "Last Updated": "2025-06-06T10:30:00.000Z"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Set": {
+      "main": [
+        [
+          {
+            "node": "Search Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Page": {
+      "main": [
+        [
+          {
+            "node": "IF Page Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Page Exists?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Block Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Block Update": {
+      "main": [
+        [
+          {
+            "node": "Update Notion Block",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Notion Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fd274fe1-8d45-45bf-aca6-76789143a32f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c66acccb2a5a37adb3c1559d18a3d2a5af2141797281a9ce02e9c7d5f4b7c38e"
+  },
+  "id": "DI20mxT1roMxwJ7A",
+  "tags": [
+    {
+      "createdAt": "2025-06-05T04:13:14.567Z",
+      "updatedAt": "2025-06-05T04:13:14.567Z",
+      "id": "KRd2l0Sv6QCVCltT",
+      "name": "COO Memory Stack"
+    }
+  ],
+  "grimeguardians": {
+    "punctuality": [
+      {
+        "timestamp": "2025-06-08T22:49:57.108Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-08T22:51:15.524Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-08T23:01:37.585Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-08T23:05:19.159Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-08T23:08:06.749Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-08T23:08:24.739Z",
+        "type": "late"
+      },
+      {
+        "timestamp": "2025-06-10T19:46:35.433Z",
+        "type": "late"
+      }
+    ],
+    "quality": []
+  },
+  "TestCleaner": {
+    "punctuality": [
+      {
+        "timestamp": "2025-06-13T18:00:08.879Z",
+        "type": "late",
+        "minutesLate": 0
+      }
+    ],
+    "quality": []
+  }
+}

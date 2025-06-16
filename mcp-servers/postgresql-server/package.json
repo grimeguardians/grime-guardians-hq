@@ -1,0 +1,30 @@
+{
+  "name": "grime-guardians-postgresql-server",
+  "version": "1.0.0",
+  "description": "PostgreSQL MCP server for Grime Guardians operations data",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "grime-guardians-postgresql-server": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "postgresql",
+    "grime-guardians",
+    "database"
+  ]
+}
