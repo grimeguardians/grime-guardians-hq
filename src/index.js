@@ -410,29 +410,45 @@ app.get('/oauth/callback', async (req, res) => {
       return res.status(400).send('Authorization code not found');
     }
     
-    console.log('[Gmail OAuth] Received authorization code');
-    console.log('[Gmail OAuth] State parameter:', state);
+    console.log('[Gmail OAuth] Received authorization code for email:', state);
     
-    // Here you would typically exchange the code for tokens
-    // and save them for the specific email account
+    // Exchange authorization code for tokens
+    const { google } = require('googleapis');
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GMAIL_CLIENT_ID,
+      process.env.GMAIL_CLIENT_SECRET,
+      'https://grimeguardians.com/oauth/callback'
+    );
     
-    res.send(`
-      <html>
-        <body>
-          <h2>Gmail OAuth Authorization Successful!</h2>
-          <p>You can close this window and return to your application.</p>
-          <p>State: ${state || 'N/A'}</p>
-          <script>
-            setTimeout(function() {
-              window.close();
-            }, 3000);
-          </script>
-        </body>
-      </html>
-    `);
-    
-    // Log the successful authorization
-    console.log('[Gmail OAuth] Authorization completed for state:', state);
+    try {
+      const { tokens } = await oauth2Client.getToken(code);
+      console.log('[Gmail OAuth] Successfully received tokens for:', state);
+      
+      // Save tokens to a file for the specific email
+      const fs = require('fs');
+      const tokenFilePath = `/root/grime-guardians-hq/gmail-tokens-${state || 'default'}.json`;
+      fs.writeFileSync(tokenFilePath, JSON.stringify(tokens, null, 2));
+      console.log('[Gmail OAuth] Tokens saved to:', tokenFilePath);
+      
+      res.send(`
+        <html>
+          <body>
+            <h2>Gmail OAuth Authorization Successful!</h2>
+            <p>Tokens have been saved for: <strong>${state || 'default account'}</strong></p>
+            <p>You can close this window and return to your application.</p>
+            <script>
+              setTimeout(function() {
+                window.close();
+              }, 3000);
+            </script>
+          </body>
+        </html>
+      `);
+      
+    } catch (tokenError) {
+      console.error('[Gmail OAuth] Token exchange failed:', tokenError);
+      res.status(500).send('Failed to exchange authorization code for tokens: ' + tokenError.message);
+    }
     
   } catch (error) {
     console.error('[Gmail OAuth] Callback error:', error);
