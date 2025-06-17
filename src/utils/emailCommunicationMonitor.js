@@ -530,11 +530,7 @@ class EmailCommunicationMonitor {
 
       const dmMessage = await opsLead.send({ embeds: [embed] });
       
-      // Add reaction options
-      await dmMessage.react('✅');
-      await dmMessage.react('❌');
-      
-      // Store for approval handling
+      // Store for approval handling (user will add their own reactions)
       this.pendingReplies.set(dmMessage.id, {
         messageData,
         replyDraft,
