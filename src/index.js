@@ -400,3 +400,42 @@ app.listen(WEBHOOK_PORT, () => {
   console.log(`[Express] Webhook server listening on port ${WEBHOOK_PORT}`);
   console.log(`[Express] POST endpoint: http://localhost:${WEBHOOK_PORT}${WEBHOOK_PATH}`);
 });
+
+// Gmail OAuth callback route
+app.get('/oauth/callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    
+    if (!code) {
+      return res.status(400).send('Authorization code not found');
+    }
+    
+    console.log('[Gmail OAuth] Received authorization code');
+    console.log('[Gmail OAuth] State parameter:', state);
+    
+    // Here you would typically exchange the code for tokens
+    // and save them for the specific email account
+    
+    res.send(`
+      <html>
+        <body>
+          <h2>Gmail OAuth Authorization Successful!</h2>
+          <p>You can close this window and return to your application.</p>
+          <p>State: ${state || 'N/A'}</p>
+          <script>
+            setTimeout(function() {
+              window.close();
+            }, 3000);
+          </script>
+        </body>
+      </html>
+    `);
+    
+    // Log the successful authorization
+    console.log('[Gmail OAuth] Authorization completed for state:', state);
+    
+  } catch (error) {
+    console.error('[Gmail OAuth] Callback error:', error);
+    res.status(500).send('OAuth callback error: ' + error.message);
+  }
+});
