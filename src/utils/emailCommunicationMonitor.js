@@ -17,6 +17,8 @@ const { google } = require('googleapis');
 const { detectScheduleRequest } = require('./scheduleDetection');
 const { getAllJobs } = require('./highlevel');
 const { createScheduleRequestPage } = require('./notion');
+const MessageClassifier = require('./messageClassifier');
+const AvaTrainingSystem = require('./avaTrainingSystem');
 require('dotenv').config();
 
 class EmailCommunicationMonitor {
@@ -24,6 +26,10 @@ class EmailCommunicationMonitor {
     this.discordClient = client;
     this.gmail = null;
     this.isMonitoring = false;
+    
+    // Enhanced AI components
+    this.messageClassifier = new MessageClassifier();
+    this.trainingSystem = new AvaTrainingSystem(client);
     
     // Tracking
     this.lastEmailCheck = new Date();
@@ -33,6 +39,7 @@ class EmailCommunicationMonitor {
     this.pendingReplies = new Map();
     
     console.log('📧 Initializing Email Communication Monitor');
+    console.log('🧠 Enhanced with GPT-4 classification and training system');
     console.log('📱 Channel 1: Google Voice (612-584-9396) → Gmail');
     console.log('📱 Channel 2: High Level (651-515-1478) → API Monitoring');
   }
@@ -240,16 +247,52 @@ class EmailCommunicationMonitor {
         return;
       }
 
-      // Check for schedule requests
-      const scheduleRequest = detectScheduleRequest(email.clientMessage);
+      // Check for schedule requests using enhanced classifier
+      const classification = await this.messageClassifier.classifyMessage(
+        email.clientMessage,
+        {
+          phone: email.clientPhone,
+          source: 'google_voice',
+          businessNumber: '612-584-9396'
+        }
+      );
+
+      // Log classification for potential training
+      await this.trainingSystem.logClassification(
+        email.id,
+        email.clientMessage,
+        classification,
+        { source: 'google_voice', phone: email.clientPhone }
+      );
+
+      console.log(`🧠 Message classified as: ${classification.category} (${Math.round(classification.confidence * 100)}% confidence)`);
       
-      if (scheduleRequest.isScheduleRequest) {
-        console.log(`🎯 Schedule request detected in Google Voice SMS from ${email.clientPhone}`);
-        await this.handleScheduleRequest({
+      // Handle based on classification
+      if (classification.category === 'schedule_change') {
+        // Use old logic for schedule changes
+        const scheduleRequest = detectScheduleRequest(email.clientMessage);
+        if (scheduleRequest.isScheduleRequest) {
+          console.log(`🎯 Schedule request detected in Google Voice SMS from ${email.clientPhone}`);
+          await this.handleScheduleRequest({
+            ...email,
+            source: 'google_voice',
+            businessNumber: '612-584-9396'
+          }, scheduleRequest);
+        }
+      } else if (classification.category === 'new_prospect') {
+        console.log(`🎯 New prospect inquiry detected from ${email.clientPhone}`);
+        await this.handleProspectInquiry({
           ...email,
           source: 'google_voice',
           businessNumber: '612-584-9396'
-        }, scheduleRequest);
+        }, classification);
+      } else if (classification.category === 'complaint') {
+        console.log(`⚠️ Customer complaint detected from ${email.clientPhone}`);
+        await this.handleComplaint({
+          ...email,
+          source: 'google_voice',
+          businessNumber: '612-584-9396'
+        }, classification);
       }
 
     } catch (error) {
@@ -390,7 +433,7 @@ class EmailCommunicationMonitor {
       const replyDraft = await this.generateReplyDraft(messageData, scheduleRequest);
       
       // 3. Send draft for approval
-      await this.sendReplyForApproval(messageData, replyDraft);
+      await this.sendApprovalRequest(messageData, replyDraft, 'Schedule Change Request');
       
       // 4. Log to Notion
       await this.logToNotion(messageData, scheduleRequest);
@@ -458,13 +501,23 @@ class EmailCommunicationMonitor {
     return replyTemplate;
   }
 
-  async sendReplyForApproval(messageData, replyDraft) {
+  async sendApprovalRequest(messageData, replyDraft, messageType = 'Message') {
     try {
       const opsLead = await this.discordClient.users.fetch(process.env.OPS_LEAD_DISCORD_ID);
       
+      // Choose appropriate color and emoji based on message type
+      const colors = {
+        'New Prospect Inquiry': 0x00ff00,
+        '⚠️ Customer Complaint - URGENT': 0xff0000,
+        'Schedule Change Request': 0xffaa00
+      };
+      
+      const color = colors[messageType] || 0x3498db;
+      
       const embed = {
-        color: 0x00ff00,
-        title: '✅ Reply Draft Ready for Approval',
+        color,
+        title: `✅ Reply Draft Ready for Approval`,
+        description: `**${messageType}**`,
         fields: [
           { name: '📞 Channel', value: messageData.source.replace('_', ' ').toUpperCase(), inline: true },
           { name: '👤 Client', value: messageData.clientName || 'Unknown', inline: true },
@@ -485,11 +538,12 @@ class EmailCommunicationMonitor {
       this.pendingReplies.set(dmMessage.id, {
         messageData,
         replyDraft,
+        messageType,
         timestamp: new Date()
       });
 
     } catch (error) {
-      console.error('❌ Error sending reply for approval:', error.message);
+      console.error('❌ Error sending approval request:', error.message);
     }
   }
 
@@ -633,6 +687,139 @@ class EmailCommunicationMonitor {
         }
       }
     };
+  }
+
+  // === NEW PROSPECT INQUIRY HANDLING ===
+  async handleProspectInquiry(messageData, classification) {
+    try {
+      // Generate appropriate response for prospect
+      const replyDraft = await this.generateProspectResponse(messageData, classification);
+      
+      // Send approval request to ops lead
+      await this.sendApprovalRequest(messageData, replyDraft, 'New Prospect Inquiry');
+      
+      // Log to Notion as prospect lead
+      await this.logToNotion(messageData, classification, 'prospect_inquiry');
+      
+    } catch (error) {
+      console.error('❌ Error handling prospect inquiry:', error.message);
+    }
+  }
+
+  async generateProspectResponse(messageData, classification) {
+    try {
+      const OpenAI = require('openai');
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const prompt = `You are responding as Grime Guardians cleaning service to a new prospect inquiry.
+
+PROSPECT MESSAGE: "${messageData.clientMessage}"
+
+Create a professional response that:
+- Thanks them for their interest
+- Asks for key details (property type, size, specific cleaning needs)
+- Mentions our quality service and competitive pricing
+- Provides next steps to get a quote
+
+Keep it under 160 characters for SMS. Be warm but professional:`;
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 100
+      });
+
+      return response.choices[0].message.content.trim();
+      
+    } catch (error) {
+      console.error('❌ Error generating prospect response:', error.message);
+      
+      // Fallback response
+      return `Hi! Thanks for your interest in Grime Guardians! I'd love to provide a quote. Could you share: property type, square footage, and what type of cleaning you need? We offer competitive rates and quality service!`;
+    }
+  }
+
+  // === COMPLAINT HANDLING ===
+  async handleComplaint(messageData, classification) {
+    try {
+      // Generate empathetic response
+      const replyDraft = await this.generateComplaintResponse(messageData, classification);
+      
+      // Send high-priority approval request
+      await this.sendApprovalRequest(messageData, replyDraft, '⚠️ Customer Complaint - URGENT');
+      
+      // Log to Notion as complaint
+      await this.logToNotion(messageData, classification, 'complaint');
+      
+      // Alert ops lead immediately
+      await this.sendUrgentAlert(messageData, 'Customer complaint requires immediate attention');
+      
+    } catch (error) {
+      console.error('❌ Error handling complaint:', error.message);
+    }
+  }
+
+  async generateComplaintResponse(messageData, classification) {
+    try {
+      const OpenAI = require('openai');
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const prompt = `You are responding as Grime Guardians to a customer complaint.
+
+COMPLAINT: "${messageData.clientMessage}"
+
+Create an empathetic, professional response that:
+- Sincerely apologizes for their experience
+- Shows we take their concerns seriously
+- Asks for specific details about the issue
+- Assures them we'll make it right
+- Provides immediate next steps
+
+Keep under 160 characters for SMS:`;
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.6,
+        max_tokens: 100
+      });
+
+      return response.choices[0].message.content.trim();
+      
+    } catch (error) {
+      console.error('❌ Error generating complaint response:', error.message);
+      
+      // Fallback response
+      return `I sincerely apologize for your experience. This is not the quality we strive for. Can you please share specific details about the issue? We will make this right immediately.`;
+    }
+  }
+
+  async sendUrgentAlert(messageData, alertMessage) {
+    try {
+      const opsLeadId = process.env.OPS_LEAD_DISCORD_ID;
+      if (!opsLeadId) return;
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      
+      const embed = {
+        title: '🚨 URGENT ALERT',
+        color: 0xff0000,
+        description: alertMessage,
+        fields: [
+          { name: '📱 Phone', value: messageData.clientPhone || 'Unknown', inline: true },
+          { name: '📅 Time', value: new Date().toLocaleString(), inline: true },
+          { name: '💬 Message', value: `\`\`\`${messageData.clientMessage.substring(0, 500)}\`\`\``, inline: false }
+        ],
+        timestamp: new Date().toISOString()
+      };
+
+      await user.send({ embeds: [embed] });
+      console.log('🚨 Urgent alert sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending urgent alert:', error.message);
+    }
   }
 }
 

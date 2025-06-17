@@ -1,0 +1,72 @@
+[
+  {
+    "timestamp": "2025-06-17T03:48:08.006Z",
+    "message": "Good evening. I'm interested in scheduling a move-out cleaning at the end of June if you've got availability? My friend Joan highly recommended your services. Could you give me a quote? It's a 2 bedroom 2 bathroom townhome, 1200 square feet.",
+    "originalClassification": {
+      "category": "schedule_change",
+      "confidence": 0.7
+    },
+    "correctClassification": {
+      "category": "new_prospect",
+      "notes": "This is clearly a new prospect asking for a quote"
+    },
+    "correctedBy": "TestUser",
+    "id": "1750132088006"
+  },
+  {
+    "timestamp": "2025-06-17T03:49:07.720Z",
+    "message": "Good evening. I'm interested in scheduling a move-out cleaning at the end of June if you've got availability? My friend Joan highly recommended your services. Could you give me a quote? It's a 2 bedroom 2 bathroom townhome, 1200 square feet.",
+    "originalClassification": {
+      "category": "schedule_change",
+      "confidence": 0.7
+    },
+    "correctClassification": {
+      "category": "new_prospect",
+      "notes": "This is clearly a new prospect asking for a quote"
+    },
+    "correctedBy": "TestUser",
+    "id": "1750132147720"
+  },
+  {
+    "timestamp": "2025-06-17T04:07:45.976Z",
+    "message": "Good evening. I'm interested in scheduling a move-out cleaning at the end of June if you've got availability? My friend Joan highly recommended your services. Could you give me a quote? It's a 2 bedroom 2 bathroom townhome, 1200 square feet.",
+    "originalClassification": {
+      "category": "schedule_change",
+      "confidence": 0.7
+    },
+    "correctClassification": {
+      "category": "new_prospect",
+      "notes": "This is clearly a new prospect asking for a quote"
+    },
+    "correctedBy": "TestUser",
+    "id": "1750133265976"
+  },
+  {
+    "timestamp": "2025-06-17T04:14:08.653Z",
+    "message": "Good evening. I'm interested in scheduling a move-out cleaning at the end of June if you've got availability? My friend Joan highly recommended your services. Could you give me a quote? It's a 2 bedroom 2 bathroom townhome, 1200 square feet.",
+    "originalClassification": {
+      "category": "schedule_change",
+      "confidence": 0.7
+    },
+    "correctClassification": {
+      "category": "new_prospect",
+      "notes": "This is clearly a new prospect asking for a quote"
+    },
+    "correctedBy": "TestUser",
+    "id": "1750133648653"
+  },
+  {
+    "timestamp": "2025-06-17T04:28:23.730Z",
+    "message": "Good evening. I'm interested in scheduling a move-out cleaning at the end of June if you've got availability? My friend Joan highly recommended your services. Could you give me a quote? It's a 2 bedroom 2 bathroom townhome, 1200 square feet.",
+    "originalClassification": {
+      "category": "schedule_change",
+      "confidence": 0.7
+    },
+    "correctClassification": {
+      "category": "new_prospect",
+      "notes": "This is clearly a new prospect asking for a quote"
+    },
+    "correctedBy": "TestUser",
+    "id": "1750134503730"
+  }
+]
