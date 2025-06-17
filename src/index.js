@@ -252,10 +252,14 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 
     // Check if this is an email reply approval reaction (DM to ops lead)
+    console.log(`[ReactionDebug] Channel type: ${reaction.message.channel.type}, User: ${user.username} (${user.id}), Emoji: ${reaction.emoji.name}`);
+    
     if (reaction.message.channel.type === 1) { // DM channel
       const emoji = reaction.emoji.name;
+      console.log(`[ReactionDebug] DM reaction detected - Emoji: ${emoji}, Expected OPS_LEAD_ID: ${process.env.OPS_LEAD_DISCORD_ID}`);
+      
       if (emoji === '✅' || emoji === '❌') {
-        console.log(`[EmailMonitor] Processing reply approval reaction: ${emoji}`);
+        console.log(`[EmailMonitor] Processing reply approval reaction: ${emoji} from user ${user.id}`);
         await emailMonitor.handleApprovalReaction(reaction.message.id, emoji, user.id);
       }
     }

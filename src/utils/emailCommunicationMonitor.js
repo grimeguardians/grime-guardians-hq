@@ -569,12 +569,27 @@ class EmailCommunicationMonitor {
 
   // === REPLY APPROVAL HANDLING ===
   async handleApprovalReaction(messageId, emoji, userId) {
-    if (userId !== process.env.OPS_LEAD_DISCORD_ID) return;
+    console.log(`[ApprovalDebug] Reaction received - MessageID: ${messageId}, Emoji: ${emoji}, UserID: ${userId}`);
+    console.log(`[ApprovalDebug] Expected OPS_LEAD_ID: ${process.env.OPS_LEAD_DISCORD_ID}`);
+    console.log(`[ApprovalDebug] User ID matches: ${userId === process.env.OPS_LEAD_DISCORD_ID}`);
+    console.log(`[ApprovalDebug] Pending replies count: ${this.pendingReplies.size}`);
+    
+    if (userId !== process.env.OPS_LEAD_DISCORD_ID) {
+      console.log(`[ApprovalDebug] User ID mismatch - ignoring reaction`);
+      return;
+    }
     
     const pendingReply = this.pendingReplies.get(messageId);
-    if (!pendingReply) return;
+    console.log(`[ApprovalDebug] Found pending reply: ${!!pendingReply}`);
+    
+    if (!pendingReply) {
+      console.log(`[ApprovalDebug] No pending reply found for message ID: ${messageId}`);
+      console.log(`[ApprovalDebug] Available message IDs: ${Array.from(this.pendingReplies.keys()).join(', ')}`);
+      return;
+    }
 
     if (emoji === '✅') {
+      console.log(`[ApprovalDebug] Approval confirmed - sending reply`);
       await this.sendApprovedReply(pendingReply);
       console.log('✅ Reply approved and sent');
     } else if (emoji === '❌') {
@@ -583,21 +598,29 @@ class EmailCommunicationMonitor {
 
     // Clean up
     this.pendingReplies.delete(messageId);
+    console.log(`[ApprovalDebug] Cleaned up pending reply - remaining: ${this.pendingReplies.size}`);
   }
 
   async sendApprovedReply(pendingReply) {
     const { messageData, replyDraft } = pendingReply;
     
+    console.log(`[SendReply] Attempting to send reply via ${messageData.source}`);
+    console.log(`[SendReply] Reply text: ${replyDraft.substring(0, 100)}...`);
+    
     try {
       if (messageData.source === 'google_voice') {
+        console.log(`[SendReply] Sending via Gmail for Google Voice`);
         // Send via Gmail (will forward as SMS through Google Voice)
         await this.sendGmailReply(messageData, replyDraft);
       } else if (messageData.source === 'high_level') {
+        console.log(`[SendReply] Sending via High Level API`);
         // Send via High Level API
         await this.sendHighLevelReply(messageData, replyDraft);
       }
+      console.log(`[SendReply] Reply sent successfully`);
     } catch (error) {
       console.error('❌ Error sending approved reply:', error.message);
+      console.error('❌ Full error:', error);
     }
   }
 
