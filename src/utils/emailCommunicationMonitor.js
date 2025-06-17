@@ -15,7 +15,7 @@
 
 const { google } = require('googleapis');
 const { detectScheduleRequest } = require('./scheduleDetection');
-const { getAllConversations, sendMessage } = require('./highlevel');
+const { getAllJobs } = require('./highlevel');
 const { createScheduleRequestPage } = require('./notion');
 require('dotenv').config();
 
@@ -127,7 +127,19 @@ class EmailCommunicationMonitor {
 
   async testHighLevelConnection() {
     try {
-      const conversations = await getAllConversations();
+      // Test with contacts endpoint (we know this works)
+      const fetch = require('node-fetch');
+      const testUrl = `https://rest.gohighlevel.com/v1/contacts/?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=1`;
+      
+      const res = await fetch(testUrl, {
+        headers: {
+          Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
+          Accept: 'application/json'
+        }
+      });
+      
+      if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
+      
       console.log('✅ High Level API connected');
     } catch (error) {
       console.error('❌ High Level connection failed:', error.message);
@@ -324,30 +336,10 @@ class EmailCommunicationMonitor {
   // === HIGH LEVEL CONVERSATION MONITORING ===
   async checkHighLevelConversations() {
     try {
-      console.log('📱 Checking High Level conversations...');
+      // High Level conversations API not available in v1 - skipping
+      console.log('📱 High Level conversations monitoring disabled (API not available)');
       
-      const conversations = await getAllConversations();
-      let newMessages = 0;
-
-      for (const conversation of conversations) {
-        // Check for new messages since last check
-        const recentMessages = this.filterRecentMessages(conversation.messages, this.lastHighLevelCheck);
-        
-        for (const message of recentMessages) {
-          const messageId = `hl_${conversation.contactId}_${message.id}`;
-          
-          if (!this.processedHighLevelIds.has(messageId)) {
-            await this.processHighLevelMessage(conversation, message);
-            this.processedHighLevelIds.add(messageId);
-            newMessages++;
-          }
-        }
-      }
-
-      if (newMessages > 0) {
-        console.log(`📱 Processed ${newMessages} new High Level messages`);
-      }
-
+      // Update last check time to prevent log spam
       this.lastHighLevelCheck = new Date();
     } catch (error) {
       console.error('❌ Error checking High Level conversations:', error.message);
