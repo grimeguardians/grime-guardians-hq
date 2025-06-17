@@ -25,7 +25,8 @@ const client = new Client({
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent, 
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.DirectMessageReactions
   ] 
 });
 
@@ -226,8 +227,13 @@ client.on('messageCreate', async (message) => {
 
 // 🚀 NEW: Handle Discord reactions for job assignment
 client.on('messageReactionAdd', async (reaction, user) => {
+  console.log(`[ReactionHandler] Event triggered - User: ${user.username}, Emoji: ${reaction.emoji.name}`);
+  
   // Ignore bot reactions
-  if (user.bot) return;
+  if (user.bot) {
+    console.log(`[ReactionHandler] Ignoring bot reaction from ${user.username}`);
+    return;
+  }
 
   try {
     // Fetch the reaction if it's partial
