@@ -399,7 +399,7 @@ async function deleteJob(jobId) {
  * @returns {Promise<Array>} Array of conversation objects
  */
 async function getAllConversations() {
-  const url = new URL('https://services.leadconnectorhq.com/conversations/');
+  const url = new URL('https://rest.gohighlevel.com/v1/conversations/');
   url.searchParams.append('locationId', process.env.HIGHLEVEL_LOCATION_ID);
   url.searchParams.append('limit', '50');
   url.searchParams.append('startAfterDate', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
@@ -407,7 +407,6 @@ async function getAllConversations() {
   const res = await fetch(url.toString(), {
     headers: {
       Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
-      Version: '2021-07-28',
       Accept: 'application/json',
     }
   });
@@ -423,12 +422,11 @@ async function getAllConversations() {
  * @returns {Promise<Object>} Response object
  */
 async function sendMessage(contactId, message) {
-  const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+  const res = await fetch(`https://rest.gohighlevel.com/v1/conversations/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
       'Content-Type': 'application/json',
-      Version: '2021-07-28',
       Accept: 'application/json',
     },
     body: JSON.stringify({
