@@ -65,21 +65,58 @@ class EmailCommunicationMonitor {
 
   async initializeGmail() {
     try {
-      const auth = new google.auth.OAuth2(
-        process.env.GMAIL_CLIENT_ID,
-        process.env.GMAIL_CLIENT_SECRET,
-        process.env.GMAIL_REDIRECT_URI
-      );
-
-      auth.setCredentials({
-        refresh_token: process.env.GMAIL_REFRESH_TOKEN
-      });
-
-      this.gmail = google.gmail({ version: 'v1', auth });
+      // Initialize Gmail clients for each email account
+      this.gmailClients = new Map();
+      const emailAddresses = process.env.GMAIL_EMAILS ? process.env.GMAIL_EMAILS.split(',') : [];
       
-      // Test connection
-      await this.gmail.users.getProfile({ userId: 'me' });
-      console.log('✅ Gmail API connected for Google Voice monitoring');
+      if (emailAddresses.length === 0) {
+        throw new Error('No Gmail emails configured in GMAIL_EMAILS environment variable');
+      }
+      
+      const fs = require('fs');
+      const path = require('path');
+      
+      for (const email of emailAddresses) {
+        const trimmedEmail = email.trim();
+        const tokenFilePath = path.join(process.cwd(), `gmail-tokens-${trimmedEmail}.json`);
+        
+        if (!fs.existsSync(tokenFilePath)) {
+          console.warn(`⚠️ Token file not found for ${trimmedEmail}: ${tokenFilePath}`);
+          continue;
+        }
+        
+        try {
+          const tokens = JSON.parse(fs.readFileSync(tokenFilePath, 'utf8'));
+          
+          const auth = new google.auth.OAuth2(
+            process.env.GMAIL_CLIENT_ID,
+            process.env.GMAIL_CLIENT_SECRET,
+            process.env.GMAIL_REDIRECT_URI
+          );
+          
+          auth.setCredentials(tokens);
+          
+          const gmailClient = google.gmail({ version: 'v1', auth });
+          
+          // Test connection
+          await gmailClient.users.getProfile({ userId: 'me' });
+          
+          this.gmailClients.set(trimmedEmail, gmailClient);
+          console.log(`✅ Gmail API connected for ${trimmedEmail}`);
+          
+        } catch (tokenError) {
+          console.error(`❌ Failed to initialize Gmail for ${trimmedEmail}:`, tokenError.message);
+        }
+      }
+      
+      if (this.gmailClients.size === 0) {
+        throw new Error('No Gmail accounts could be initialized');
+      }
+      
+      // Set primary gmail client (for backward compatibility)
+      this.gmail = this.gmailClients.values().next().value;
+      
+      console.log(`✅ Gmail monitoring initialized for ${this.gmailClients.size} email account(s)`);
       
     } catch (error) {
       console.error('❌ Gmail initialization failed:', error.message);
