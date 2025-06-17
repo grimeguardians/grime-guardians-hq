@@ -29,26 +29,40 @@ if (HIGHLEVEL_DISABLED) {
   };
 }
 
-const HIGHLEVEL_PRIVATE_INTEGRATION = process.env.HIGHLEVEL_PRIVATE_INTEGRATION;
+const HIGHLEVEL_API_KEY = process.env.HIGHLEVEL_API_KEY;
+const HIGHLEVEL_LOCATION_ID = process.env.HIGHLEVEL_LOCATION_ID;
 const CALENDAR_ID = process.env.HIGHLEVEL_CALENDAR_ID || 'sb6IQR2sx5JXOQqMgtf5';
-const BASE_URL = `https://services.leadconnectorhq.com/calendars/${CALENDAR_ID}/appointments`;
+const BASE_URL = 'https://rest.gohighlevel.com/v1/appointments/';
 
 /**
- * Fetch all upcoming appointments from High Level calendar using private integration token
+ * Fetch all upcoming appointments from High Level calendar using correct API format
  * @returns {Promise<Array>} Array of appointment objects
  */
 async function fetchAllAppointments() {
-  const res = await fetch(BASE_URL, {
+  // Get timestamps for today and 90 days from now
+  const today = Date.now();
+  const futureDate = Date.now() + (90*24*60*60*1000); // 90 days
+  
+  const params = new URLSearchParams({
+    locationId: HIGHLEVEL_LOCATION_ID,
+    calendarId: CALENDAR_ID,
+    startDate: today.toString(),
+    endDate: futureDate.toString()
+  });
+  
+  const url = `${BASE_URL}?${params}`;
+  
+  const res = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${HIGHLEVEL_PRIVATE_INTEGRATION}`,
-      Version: '2021-07-28', // Use latest required by API
+      Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
       Accept: 'application/json',
     },
   });
+  
   if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
   const data = await res.json();
-  // The structure may be { appointments: [...] } or just an array; adjust as needed
-  return data.appointments || data || [];
+  
+  return data.appointments || [];
 }
 
 /**
