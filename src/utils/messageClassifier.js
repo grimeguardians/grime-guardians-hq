@@ -33,12 +33,14 @@ class MessageClassifier {
       // If confident, return immediately
       if (quickClassification.confidence > 0.8) {
         console.log('🎯 High confidence rule-based classification - skipping GPT');
+        console.log(`   Result: ${quickClassification.type} (confidence: ${quickClassification.confidence})`);
         return quickClassification;
       }
       
       // Otherwise, try GPT for deeper analysis (if available)
       try {
         const gptClassification = await this.gptClassify(message, senderInfo);
+        console.log(`🤖 GPT classification: ${gptClassification.type} (confidence: ${gptClassification.confidence})`);
         
         // Combine results
         return {
@@ -47,6 +49,7 @@ class MessageClassifier {
         };
       } catch (error) {
         console.log('⚠️ GPT unavailable - using rule-based classification');
+        console.log(`   Fallback result: ${quickClassification.type} (confidence: ${quickClassification.confidence})`);
         return quickClassification;
       }
       
@@ -54,7 +57,9 @@ class MessageClassifier {
       console.error('❌ Message classification error:', error.message);
       
       // Fallback to rule-based only
-      return this.quickClassify(message);
+      const fallback = this.quickClassify(message);
+      console.log(`🔄 Emergency fallback: ${fallback.type} (confidence: ${fallback.confidence})`);
+      return fallback;
     }
   }
 
@@ -74,10 +79,17 @@ class MessageClassifier {
 
     // Schedule change indicators
     const scheduleKeywords = [
-      'reschedule', 'change', 'move', 'cancel', 'postpone',
+      'reschedule', 'change my', 'move my', 'cancel my', 'postpone',
       'different time', 'another day', 'new time',
-      'tomorrow', 'this week', 'next week', 'monday', 'tuesday',
-      'sick', 'emergency', 'family', 'traveling', 'out of town'
+      'sick', 'emergency', 'family', 'traveling', 'out of town',
+      'push back', 'push forward', 'delay'
+    ];
+
+    // General operations/questions
+    const operationsKeywords = [
+      'what time', 'when is', 'appointment time', 'scheduled for',
+      'add to', 'include', 'extra service', 'additional',
+      'how long', 'how much time', 'duration'
     ];
 
     // Complaint indicators
@@ -91,6 +103,7 @@ class MessageClassifier {
     const prospectMatches = prospectKeywords.filter(keyword => text.includes(keyword));
     const scheduleMatches = scheduleKeywords.filter(keyword => text.includes(keyword));
     const complaintMatches = complaintKeywords.filter(keyword => text.includes(keyword));
+    const operationsMatches = operationsKeywords.filter(keyword => text.includes(keyword));
 
     // Determine primary category
     let category = 'general';
@@ -101,10 +114,14 @@ class MessageClassifier {
       category = 'complaint';
       confidence = Math.min(complaintMatches.length * 0.3 + 0.4, 0.9);
       keywords = complaintMatches;
-    } else if (scheduleMatches.length > 1) {
+    } else if (scheduleMatches.length > 0) {
       category = 'schedule_change';
-      confidence = Math.min(scheduleMatches.length * 0.25 + 0.3, 0.85);
+      confidence = Math.min(scheduleMatches.length * 0.25 + 0.5, 0.85);
       keywords = scheduleMatches;
+    } else if (operationsMatches.length > 0) {
+      category = 'general'; // Will map to 'operations'
+      confidence = Math.min(operationsMatches.length * 0.3 + 0.4, 0.8);
+      keywords = operationsMatches;
     } else if (prospectMatches.length > 1) {
       category = 'new_prospect';
       confidence = Math.min(prospectMatches.length * 0.2 + 0.4, 0.8);
@@ -170,8 +187,14 @@ class MessageClassifier {
 
       const result = JSON.parse(response.choices[0].message.content);
       
+      // Apply type mapping to GPT results too
       return {
-        ...result,
+        type: this.mapToOperationalTypes(result.category),
+        confidence: result.confidence,
+        category: result.category, // Keep original for reference
+        reasoning: result.reasoning,
+        urgency: result.urgency,
+        suggested_response_type: result.suggested_response_type,
         method: 'gpt4'
       };
       
