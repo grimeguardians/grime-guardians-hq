@@ -40,16 +40,40 @@ class ConversationManager {
     // Classify message with conversation context
     const classification = await this.classifyWithContext(messageData, conversation);
     
-    console.log(`🧠 Message classified as: ${classification.type} (${classification.confidence}% confidence)`);
+    console.log(`🧠 Ava Classification: ${classification.type} (${classification.confidence}% confidence)`);
     console.log(`📞 Phone: ${phoneNumber}, Thread length: ${conversation.messages.length}`);
 
-    // Route based on classification
-    if (classification.type === 'sales' || classification.type === 'pricing' || classification.type === 'new_prospect') {
-      return await this.handleSalesHandoff(messageData, conversation, classification);
-    } else if (classification.type === 'operations') {
+    // 🚫 AVA (COO) OPERATIONS-ONLY SCOPE:
+    // All sales/pricing inquiries are ignored - Dean (CMO) handles those
+    const salesTypes = ['sales', 'pricing', 'new_prospect', 'pricing_inquiry', 'quote_request'];
+    
+    if (salesTypes.includes(classification.type)) {
+      console.log(`🚫 SALES INQUIRY DETECTED - Ava ignoring (Dean will handle)`);
+      console.log(`📋 Message: "${messageData.clientMessage.substring(0, 50)}..."`);
+      
+      return {
+        action: 'ignore_sales_inquiry',
+        reason: 'Sales inquiries handled by Dean (CMO) system',
+        classification,
+        messageData
+      };
+    }
+
+    // Route operational inquiries only
+    if (classification.type === 'operations' || 
+        classification.type === 'scheduling_inquiry' ||
+        classification.type === 'reschedule_request' ||
+        classification.type === 'complaint') {
       return await this.handleOperationalInquiry(messageData, conversation, classification);
     } else {
-      return await this.handleUncertainMessage(messageData, conversation, classification);
+      // Non-operational messages also ignored (Dean's territory)
+      console.log(`🚫 NON-OPERATIONAL MESSAGE - Ava ignoring (Dean's territory)`);
+      return {
+        action: 'ignore_non_operational',
+        reason: 'Only operational inquiries handled by Ava',
+        classification,
+        messageData
+      };
     }
   }
 

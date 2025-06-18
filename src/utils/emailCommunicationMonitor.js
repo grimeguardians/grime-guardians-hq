@@ -258,9 +258,14 @@ class EmailCommunicationMonitor {
       console.log(`🔄 Conversation result: ${conversationResult.action}`);
       
       // Handle based on conversation manager decision
-      if (conversationResult.action === 'cmo_handoff') {
-        await this.handleCMOHandoff(conversationResult);
-        return; // Exit early - CMO handles this
+      if (conversationResult.action === 'ignore_sales_inquiry') {
+        console.log(`🚫 SALES INQUIRY IGNORED - Dean (CMO) will handle this`);
+        console.log(`📋 Reason: ${conversationResult.reason}`);
+        return; // Ava stays silent - Dean's territory
+      } else if (conversationResult.action === 'ignore_non_operational') {
+        console.log(`🚫 NON-OPERATIONAL MESSAGE IGNORED - Dean's territory`);
+        console.log(`📋 Reason: ${conversationResult.reason}`);
+        return; // Ava stays silent - Dean's territory
       } else if (conversationResult.action === 'operational_response') {
         await this.handleOperationalResponse(conversationResult);
         return; // Exit early - Ava handled this
