@@ -1,11 +1,35 @@
-# 🧠 Enhanced Ava System Deployment Guide - Operations Focus
+# 🧠 Enhanced Ava System - Operations-Only Focus
 
-## 🎯 **NEW ARCHITECTURE: Operations-First Ava + CMO Sales Handoff**
+## 🎯 **UPDATED: Pure Operations COO (No Sales)**
 
-### **Updated Core Philosophy:**
-- **Ava (COO)**: Pure operations focus - scheduling, logistics, client management, operational support
-- **CMO Suite**: All sales, pricing, lead qualification, prospect conversion
-- **Clear Handoff**: Booked clients transfer from CMO to Ava for operational management
+### **✅ COMPLETED: Ava Scope Cleanup**
+**Date: 2025-06-17**
+
+Ava (COO) now operates with **pure operations focus** - all sales inquiries are completely ignored.
+
+### **🚫 Ava IGNORES (Dean's Territory):**
+- `"How much for deep cleaning?"` → **SILENCE**
+- `"I need a quote"` → **SILENCE**  
+- `"What's your pricing?"` → **SILENCE**
+- Any new prospect inquiry → **SILENCE**
+
+### **✅ Ava HANDLES (Operations Only):**
+- `"What time is my cleaning tomorrow?"` → **RESPONDS**
+- `"Can we reschedule Thursday to Friday?"` → **RESPONDS**
+- `"Add fridge cleaning (+$120)"` → **RESPONDS** (existing client add-ons)
+- `"The team is running late"` → **RESPONDS**
+- Complaints, scheduling, logistics → **RESPONDS**
+
+### **🔧 Technical Implementation:**
+```javascript
+// Sales inquiry detection
+const salesTypes = ['sales', 'pricing', 'new_prospect', 'pricing_inquiry', 'quote_request'];
+
+if (salesTypes.includes(classification.type)) {
+  console.log(`🚫 SALES INQUIRY DETECTED - Ava ignoring (Dean will handle)`);
+  return { action: 'ignore_sales_inquiry' };
+}
+```
 
 ## ✅ What's Been Implemented
 
