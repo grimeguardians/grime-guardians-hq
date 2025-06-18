@@ -257,18 +257,23 @@ Conversation Context:
    * Generate operational response with context
    */
   async generateOperationalResponse(messageData, conversation, classification) {
-    // This will integrate with GPT for contextual responses
-    // For now, return structured response data
+    // Map classification types to handlers
+    const classType = classification.type;
     
-    if (classification.type === 'scheduling') {
-      return this.handleSchedulingInquiry(messageData, conversation);
-    } else if (classification.type === 'service_status') {
-      return this.handleServiceStatusInquiry(messageData, conversation);
-    } else if (classification.type === 'complaint') {
-      return this.handleComplaintInquiry(messageData, conversation);
+    console.log(`🎯 Generating response for type: ${classType}`);
+    
+    if (classType === 'reschedule_request' || classType === 'scheduling') {
+      return this.handleSchedulingInquiry(messageData, conversation, classification);
+    } else if (classType === 'service_inquiry' || classType === 'service_status') {
+      return this.handleServiceStatusInquiry(messageData, conversation, classification);
+    } else if (classType === 'complaint') {
+      return this.handleComplaintInquiry(messageData, conversation, classification);
+    } else if (classType === 'operations') {
+      return this.handleGeneralOperationsInquiry(messageData, conversation, classification);
     }
 
     // Default operational response
+    console.log(`⚠️ Using default response for unhandled type: ${classType}`);
     return {
       text: "I'd be happy to help with your service needs. Could you provide more details about what you need assistance with?",
       confidence: 60,
@@ -277,32 +282,92 @@ Conversation Context:
   }
 
   /**
-   * Handle scheduling inquiries
+   * Handle scheduling inquiries (reschedule requests)
    */
-  handleSchedulingInquiry(messageData, conversation) {
+  handleSchedulingInquiry(messageData, conversation, classification) {
+    const message = messageData.content || messageData.text || '';
+    
     // Check if this is a recurring client with existing schedule
-    if (conversation.clientProfile.isRecurring) {
+    if (conversation.clientProfile && conversation.clientProfile.isRecurring) {
       return {
-        text: `Hi ${conversation.clientProfile.name || 'there'}! I can help with your ${conversation.clientProfile.frequency} cleaning schedule. What would you like to adjust?`,
+        text: `Hi ${conversation.clientProfile.name || 'there'}! I can help reschedule your ${conversation.clientProfile.frequency || 'regular'} cleaning. What day would work better for you?`,
         confidence: 85,
         awaitingResponse: "schedule_change_details"
       };
     }
 
+    // Generic reschedule response
     return {
-      text: "I can help you with scheduling. Are you looking to book a new cleaning, reschedule an existing appointment, or check on your upcoming service?",
-      confidence: 75,
-      awaitingResponse: "scheduling_intent"
+      text: "I can help you reschedule your cleaning appointment. What day and time would work better for you?",
+      confidence: 80,
+      awaitingResponse: "schedule_change_details"
+    };
+  }
+
+  /**
+   * Handle general operations inquiries
+   */
+  handleGeneralOperationsInquiry(messageData, conversation, classification) {
+    const message = (messageData.content || messageData.text || '').toLowerCase();
+    
+    // Check for common operations patterns
+    if (message.includes('time') || message.includes('when')) {
+      return {
+        text: "Let me check your appointment time. Could you provide your name or phone number so I can look up your booking?",
+        confidence: 75,
+        awaitingResponse: "customer_info"
+      };
+    }
+    
+    if (message.includes('add') || message.includes('extra') || message.includes('additional')) {
+      return {
+        text: "I'd be happy to help add services to your cleaning. What additional service would you like to include?",
+        confidence: 80,
+        awaitingResponse: "service_addition"
+      };
+    }
+    
+    if (message.includes('cancel')) {
+      return {
+        text: "I can help you with cancellation. Could you provide your appointment date so I can locate your booking?",
+        confidence: 75,
+        awaitingResponse: "cancellation_details"
+      };
+    }
+
+    // General operational response
+    return {
+      text: "I'm here to help with your cleaning service needs. Are you looking to schedule, reschedule, add services, or have questions about an existing appointment?",
+      confidence: 70,
+      awaitingResponse: "service_intent"
     };
   }
 
   /**
    * Handle service status inquiries
    */
-  handleServiceStatusInquiry(messageData, conversation) {
+  handleServiceStatusInquiry(messageData, conversation, classification) {
+    const message = (messageData.content || messageData.text || '').toLowerCase();
+    
+    if (message.includes('when') || message.includes('time')) {
+      return {
+        text: "I can check when your cleaning is scheduled. Could you provide your name or the phone number for your booking?",
+        confidence: 80,
+        awaitingResponse: "customer_lookup"
+      };
+    }
+    
+    if (message.includes('status') || message.includes('update')) {
+      return {
+        text: "I can provide an update on your service. What's your booking date or reference number?",
+        confidence: 75,
+        awaitingResponse: "service_reference"
+      };
+    }
+
     return {
-      text: "I can check on your service status. Could you confirm the date of your cleaning or provide your booking reference?",
-      confidence: 80,
+      text: "I can help check on your service status. Could you provide your appointment date or booking reference so I can look this up for you?",
+      confidence: 70,
       awaitingResponse: "service_reference"
     };
   }
@@ -310,10 +375,25 @@ Conversation Context:
   /**
    * Handle complaint inquiries
    */
-  handleComplaintInquiry(messageData, conversation) {
+  handleComplaintInquiry(messageData, conversation, classification) {
+    const message = (messageData.content || messageData.text || '').toLowerCase();
+    
+    // Determine complaint urgency
+    const urgentWords = ['terrible', 'awful', 'damaged', 'broken', 'refund', 'unacceptable'];
+    const isUrgent = urgentWords.some(word => message.includes(word));
+    
+    if (isUrgent) {
+      return {
+        text: "I'm very sorry to hear about this issue. This needs immediate attention. I'm escalating this to management right away. Could you please provide details about what happened so we can address it promptly?",
+        confidence: 90, // High confidence but still needs approval for complaints
+        awaitingResponse: "urgent_complaint_details",
+        escalate: true
+      };
+    }
+
     return {
-      text: "I'm sorry to hear about any concerns. I'd like to address this right away. Could you please describe the issue so I can escalate it appropriately?",
-      confidence: 60, // Always low confidence for complaints - require approval
+      text: "I apologize for any concerns with your cleaning service. I'd like to make this right. Could you please describe what happened so I can address it appropriately?",
+      confidence: 85,
       awaitingResponse: "complaint_details"
     };
   }

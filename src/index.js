@@ -129,6 +129,50 @@ client.on('messageCreate', async (message) => {
       // Then check for training
       const wasTraining = await emailMonitor.trainingSystem.handleNaturalLanguageTraining(message);
       if (wasTraining) return; // Training handled, don't process as regular message
+      
+      // Handle direct conversation with Ava
+      const content = message.content.trim().toLowerCase();
+      
+      // Skip approval commands (handled below)
+      if (['yes', 'approve', 'no', 'reject'].includes(content)) {
+        // Let approval logic handle this
+      } else {
+        // Direct conversation with Ava
+        try {
+          console.log(`💬 Direct message to Ava: "${message.content}"`);
+          
+          // Create a fake message data object for Ava to process
+          const directMessageData = {
+            content: message.content,
+            from: `Direct Message from ${message.author.username}`,
+            source: 'discord_dm',
+            clientPhone: `discord_${message.author.id}`,
+            timestamp: new Date(),
+            thread: `dm_${message.author.id}`
+          };
+          
+          // Process through conversation manager
+          const result = await conversationManager.processMessage(directMessageData);
+          
+          if (result.action === 'operational_response') {
+            await message.reply(`🤖 **Ava**: ${result.response.text}`);
+            console.log(`✅ Responded to direct message with: ${result.response.text.substring(0, 100)}...`);
+          } else if (result.action === 'ignore_sales_inquiry') {
+            await message.reply(`🤖 **Ava**: That sounds like a sales inquiry! Dean (our CMO bot) will handle those types of questions once he's online. For now, I focus on operational support like scheduling, complaints, and service questions.`);
+          } else if (result.action === 'ignore_non_operational') {
+            await message.reply(`🤖 **Ava**: I'm designed to handle operational matters like scheduling, service questions, and complaints. Is there something specific about your cleaning service I can help with?`);
+          } else {
+            await message.reply(`🤖 **Ava**: I'm here to help with operational matters! Try asking me about scheduling, service questions, or if you have any concerns about your cleaning service.`);
+          }
+          
+          return; // Don't process further
+          
+        } catch (error) {
+          console.error(`❌ Error in direct conversation:`, error);
+          await message.reply(`🤖 **Ava**: Sorry, I had a technical hiccup. Try asking me again!`);
+          return;
+        }
+      }
     }
   }
   
