@@ -19,6 +19,7 @@ const { getAllJobs } = require('./highlevel');
 const { createScheduleRequestPage } = require('./notion');
 const MessageClassifier = require('./messageClassifier');
 const AvaTrainingSystem = require('./avaTrainingSystem');
+const ConversationManager = require('./conversationManager');
 require('dotenv').config();
 
 class EmailCommunicationMonitor {
@@ -30,6 +31,7 @@ class EmailCommunicationMonitor {
     // Enhanced AI components
     this.messageClassifier = new MessageClassifier();
     this.trainingSystem = new AvaTrainingSystem(client);
+    this.conversationManager = new ConversationManager(client);
     
     // Tracking
     this.lastEmailCheck = new Date();
@@ -247,53 +249,28 @@ class EmailCommunicationMonitor {
         return;
       }
 
-      // Check for schedule requests using enhanced classifier
-      const classification = await this.messageClassifier.classifyMessage(
-        email.clientMessage,
-        {
-          phone: email.clientPhone,
-          source: 'google_voice',
-          businessNumber: '612-584-9396'
-        }
-      );
+      // Process with conversation manager for context awareness
+      const conversationResult = await this.conversationManager.processMessage({
+        ...email,
+        source: 'google_voice'
+      });
 
-      // Log classification for potential training
-      await this.trainingSystem.logClassification(
-        email.id,
-        email.clientMessage,
-        classification,
-        { source: 'google_voice', phone: email.clientPhone }
-      );
-
-      console.log(`🧠 Message classified as: ${classification.category} (${Math.round(classification.confidence * 100)}% confidence)`);
+      console.log(`🔄 Conversation result: ${conversationResult.action}`);
       
-      // Handle based on classification
-      if (classification.category === 'schedule_change') {
-        // Use old logic for schedule changes
-        const scheduleRequest = detectScheduleRequest(email.clientMessage);
-        if (scheduleRequest.isScheduleRequest) {
-          console.log(`🎯 Schedule request detected in Google Voice SMS from ${email.clientPhone}`);
-          await this.handleScheduleRequest({
-            ...email,
-            source: 'google_voice',
-            businessNumber: '612-584-9396'
-          }, scheduleRequest);
-        }
-      } else if (classification.category === 'new_prospect') {
-        console.log(`🎯 New prospect inquiry detected from ${email.clientPhone}`);
-        await this.handleProspectInquiry({
-          ...email,
-          source: 'google_voice',
-          businessNumber: '612-584-9396'
-        }, classification);
-      } else if (classification.category === 'complaint') {
-        console.log(`⚠️ Customer complaint detected from ${email.clientPhone}`);
-        await this.handleComplaint({
-          ...email,
-          source: 'google_voice',
-          businessNumber: '612-584-9396'
-        }, classification);
+      // Handle based on conversation manager decision
+      if (conversationResult.action === 'cmo_handoff') {
+        await this.handleCMOHandoff(conversationResult);
+        return; // Exit early - CMO handles this
+      } else if (conversationResult.action === 'operational_response') {
+        await this.handleOperationalResponse(conversationResult);
+        return; // Exit early - Ava handled this
+      } else if (conversationResult.action === 'request_guidance') {
+        await this.handleGuidanceRequest(conversationResult);
+        return; // Exit early - Requested human guidance
       }
+
+      // If we get here, something went wrong - log it
+      console.log(`⚠️ Unknown conversation result action: ${conversationResult.action}`);
 
     } catch (error) {
       console.error('❌ Error processing Google Voice email:', error.message);
@@ -839,6 +816,201 @@ Keep under 160 characters for SMS:`;
     } catch (error) {
       console.error('❌ Error sending urgent alert:', error.message);
     }
+  }
+
+  // === NEW CONVERSATION-AWARE HANDLERS ===
+
+  /**
+   * Handle CMO handoff for sales inquiries
+   */
+  async handleCMOHandoff(conversationResult) {
+    const { messageData, conversation, classification, transitionMessage } = conversationResult;
+    
+    console.log(`🔄 Routing to CMO: ${classification.type} inquiry from ${conversation.phoneNumber}`);
+    
+    // Send transition message if provided
+    if (transitionMessage) {
+      console.log(`📤 Sending transition message: ${transitionMessage}`);
+      
+      // For now, just log - in production this would send the message
+      // await this.sendMessage(messageData, transitionMessage);
+    }
+
+    // Create CMO notification (this would integrate with your CMO suite)
+    const cmoNotification = {
+      type: 'sales_handoff',
+      source: messageData.source,
+      phoneNumber: conversation.phoneNumber,
+      clientMessage: messageData.clientMessage,
+      classification: classification.type,
+      confidence: classification.confidence,
+      conversationHistory: conversation.messages.slice(-5), // Last 5 messages for context
+      transitionSent: !!transitionMessage,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log('🎯 CMO handoff data prepared:', {
+      phone: conversation.phoneNumber,
+      type: classification.type,
+      historyLength: conversation.messages.length
+    });
+
+    // TODO: Integrate with CMO suite API/Discord channel
+    // For now, send to ops lead as notification
+    await this.sendCMOHandoffNotification(cmoNotification);
+  }
+
+  /**
+   * Handle operational response from Ava
+   */
+  async handleOperationalResponse(conversationResult) {
+    const { messageData, conversation, response, requiresApproval } = conversationResult;
+    
+    console.log(`⚙️ Operational response: ${response.confidence}% confidence`);
+    
+    if (requiresApproval) {
+      // Send for approval like existing system
+      await this.sendReplyForApproval(messageData, response.text, 'Operational Inquiry');
+    } else {
+      // Auto-send high confidence operational responses
+      console.log(`🚀 Auto-sending operational response (${response.confidence}% confidence)`);
+      await this.sendOperationalReply(messageData, response.text);
+      
+      // Update conversation after sending
+      this.conversationManager.updateConversationAfterResponse(
+        conversation.phoneNumber, 
+        response.text, 
+        true
+      );
+    }
+  }
+
+  /**
+   * Handle guidance requests for uncertain messages
+   */
+  async handleGuidanceRequest(conversationResult) {
+    const { messageData, conversation, classification, question } = conversationResult;
+    
+    console.log(`❓ Requesting guidance for uncertain message`);
+    
+    // Send guidance request to ops lead
+    await this.sendGuidanceRequest(messageData, conversation, question);
+  }
+
+  /**
+   * Send CMO handoff notification
+   */
+  async sendCMOHandoffNotification(cmoData) {
+    try {
+      const opsLead = await this.discordClient.users.fetch(process.env.OPS_LEAD_DISCORD_ID);
+      
+      const embed = {
+        color: 0xFF6B35, // Orange for sales
+        title: '🎯 CMO Handoff - Sales Inquiry',
+        description: `**${cmoData.classification.toUpperCase()}** inquiry routed to sales team`,
+        fields: [
+          { name: '📞 Channel', value: cmoData.source.replace('_', ' ').toUpperCase(), inline: true },
+          { name: '📱 Phone', value: cmoData.phoneNumber, inline: true },
+          { name: '🎯 Type', value: cmoData.classification, inline: true },
+          { name: '💬 Message', value: cmoData.clientMessage.substring(0, 300) + '...', inline: false },
+          { name: '🔄 Transition Sent', value: cmoData.transitionSent ? 'Yes' : 'No', inline: true },
+          { name: '📊 Confidence', value: `${Math.round(cmoData.confidence * 100)}%`, inline: true }
+        ],
+        footer: { text: 'CMO Suite will handle sales process' },
+        timestamp: cmoData.timestamp
+      };
+
+      await opsLead.send({ embeds: [embed] });
+      console.log('✅ CMO handoff notification sent');
+      
+    } catch (error) {
+      console.error('❌ Error sending CMO handoff notification:', error.message);
+    }
+  }
+
+  /**
+   * Send operational reply directly (high confidence)
+   */
+  async sendOperationalReply(messageData, replyText) {
+    try {
+      if (messageData.source === 'google_voice') {
+        await this.sendGmailReply(messageData, replyText);
+        console.log(`✅ Operational reply sent automatically`);
+      } else if (messageData.source === 'high_level') {
+        await this.sendHighLevelReply(messageData, replyText);
+        console.log(`✅ Operational reply sent via High Level`);
+      }
+    } catch (error) {
+      console.error('❌ Error sending operational reply:', error.message);
+    }
+  }
+
+  /**
+   * Send guidance request to ops lead
+   */
+  async sendGuidanceRequest(messageData, conversation, question) {
+    try {
+      const opsLead = await this.discordClient.users.fetch(process.env.OPS_LEAD_DISCORD_ID);
+      
+      const embed = {
+        color: 0xFFD93D, // Yellow for guidance
+        title: '❓ Guidance Request',
+        description: question,
+        fields: [
+          { name: '📞 Channel', value: messageData.source.replace('_', ' ').toUpperCase(), inline: true },
+          { name: '📱 Phone', value: conversation.phoneNumber, inline: true },
+          { name: '💬 Message', value: messageData.clientMessage, inline: false },
+          { name: '🧵 Thread Length', value: conversation.messages.length.toString(), inline: true },
+          { name: '⏰ Last Interaction', value: conversation.lastInteraction.toLocaleString(), inline: true }
+        ],
+        footer: { text: 'Reply with guidance: "Ava, handle this as [operations/sales]"' }
+      };
+
+      await opsLead.send({ embeds: [embed] });
+      console.log('❓ Guidance request sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending guidance request:', error.message);
+    }
+  }
+
+  /**
+   * Learn from Discord feedback
+   */
+  async processDiscordFeedback(message) {
+    if (message.author.id !== process.env.OPS_LEAD_DISCORD_ID) return false;
+    
+    const feedback = message.content.toLowerCase();
+    
+    // Check if this is feedback for Ava
+    if (feedback.includes('ava,') || feedback.startsWith('ava ')) {
+      const instruction = feedback.replace(/^ava,?\s*/, '');
+      
+      console.log(`📚 Processing feedback: ${instruction}`);
+      
+      // Parse common feedback patterns
+      if (instruction.includes('route') && instruction.includes('cmo')) {
+        // "Ava, route pricing questions to CMO"
+        await this.conversationManager.learnFromFeedback(instruction, {
+          type: 'routing_rule',
+          action: 'route_to_cmo'
+        });
+      } else if (instruction.includes('handle') && instruction.includes('operations')) {
+        // "Ava, handle this as operations"
+        await this.conversationManager.learnFromFeedback(instruction, {
+          type: 'classification_correction',
+          action: 'handle_as_operations'
+        });
+      }
+      
+      // Send acknowledgment
+      await message.react('✅');
+      await message.reply('Got it! I\'ll learn from this feedback.');
+      
+      return true;
+    }
+    
+    return false;
   }
 }
 
