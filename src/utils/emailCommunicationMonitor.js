@@ -875,7 +875,7 @@ Keep under 160 characters for SMS:`;
     
     if (requiresApproval) {
       // Send for approval like existing system
-      await this.sendReplyForApproval(messageData, response.text, 'Operational Inquiry');
+      await this.sendApprovalRequest(messageData, response.text, 'Operational Inquiry');
     } else {
       // Auto-send high confidence operational responses
       console.log(`🚀 Auto-sending operational response (${response.confidence}% confidence)`);

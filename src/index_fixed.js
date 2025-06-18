@@ -25,8 +25,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent, 
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.DirectMessageReactions
+    GatewayIntentBits.GuildMessageReactions
   ] 
 });
 
@@ -122,11 +121,6 @@ client.on('messageCreate', async (message) => {
   if (message.channel.type === 1) { // DM channel
     const isOpsLead = message.author.id === process.env.OPS_LEAD_DISCORD_ID;
     if (isOpsLead) {
-      // Check for conversation feedback first
-      const wasFeedback = await emailMonitor.processDiscordFeedback(message);
-      if (wasFeedback) return;
-      
-      // Then check for training
       const wasTraining = await emailMonitor.trainingSystem.handleNaturalLanguageTraining(message);
       if (wasTraining) return; // Training handled, don't process as regular message
     }
@@ -232,13 +226,8 @@ client.on('messageCreate', async (message) => {
 
 // 🚀 NEW: Handle Discord reactions for job assignment
 client.on('messageReactionAdd', async (reaction, user) => {
-  console.log(`[ReactionHandler] Event triggered - User: ${user.username}, Emoji: ${reaction.emoji.name}`);
-  
   // Ignore bot reactions
-  if (user.bot) {
-    console.log(`[ReactionHandler] Ignoring bot reaction from ${user.username}`);
-    return;
-  }
+  if (user.bot) return;
 
   try {
     // Fetch the reaction if it's partial
@@ -263,14 +252,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 
     // Check if this is an email reply approval reaction (DM to ops lead)
-    console.log(`[ReactionDebug] Channel type: ${reaction.message.channel.type}, User: ${user.username} (${user.id}), Emoji: ${reaction.emoji.name}`);
-    
     if (reaction.message.channel.type === 1) { // DM channel
       const emoji = reaction.emoji.name;
-      console.log(`[ReactionDebug] DM reaction detected - Emoji: ${emoji}, Expected OPS_LEAD_ID: ${process.env.OPS_LEAD_DISCORD_ID}`);
-      
       if (emoji === '✅' || emoji === '❌') {
-        console.log(`[EmailMonitor] Processing reply approval reaction: ${emoji} from user ${user.id}`);
+        console.log(`[EmailMonitor] Processing reply approval reaction: ${emoji}`);
         await emailMonitor.handleApprovalReaction(reaction.message.id, emoji, user.id);
       }
     }
