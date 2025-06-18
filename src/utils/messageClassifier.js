@@ -135,11 +135,26 @@ class MessageClassifier {
     }
 
     return {
-      category,
+      type: this.mapToOperationalTypes(category),
       confidence,
       keywords,
       method: 'rule_based'
     };
+  }
+
+  /**
+   * Map legacy classification types to operational types Ava expects
+   */
+  mapToOperationalTypes(category) {
+    const typeMapping = {
+      'schedule_change': 'reschedule_request',
+      'new_prospect': 'pricing_inquiry', // This will be ignored by Ava (Dean's territory)
+      'complaint': 'complaint',
+      'general': 'operations', // General operational questions
+      'spam': 'spam'
+    };
+
+    return typeMapping[category] || 'operations';
   }
 
   async gptClassify(message, senderInfo = {}) {
