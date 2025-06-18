@@ -1,22 +1,36 @@
-# 🧠 Enhanced Ava System Deployment Guide
+# 🧠 Enhanced Ava System Deployment Guide - Operations Focus
 
-## ✅ What's Been Fixed
+## 🎯 **NEW ARCHITECTURE: Operations-First Ava + CMO Sales Handoff**
 
-### 1. **Message Classification Issue**
-- **Problem**: Ava misclassified new prospect inquiry as "reschedule request"
-- **Solution**: Added GPT-3.5-turbo powered classification system that properly distinguishes:
-  - `new_prospect` - New customer inquiries asking for quotes/scheduling
-  - `schedule_change` - Existing customers wanting to reschedule/cancel
-  - `complaint` - Customer complaints requiring urgent attention
-  - `general` - Thanks, questions, or other non-actionable messages
+### **Updated Core Philosophy:**
+- **Ava (COO)**: Pure operations focus - scheduling, logistics, client management, operational support
+- **CMO Suite**: All sales, pricing, lead qualification, prospect conversion
+- **Clear Handoff**: Booked clients transfer from CMO to Ava for operational management
 
-### 2. **Missing Reaction Handling**
-- **Problem**: Ava didn't respond to Discord ✅/❌ reactions
-- **Solution**: Fixed `handleApprovalReaction()` method to properly send approved messages via Gmail/High Level
+## ✅ What's Been Implemented
 
-### 3. **Training System**
-- **Problem**: No way to correct Ava's mistakes and improve performance
-- **Solution**: Added comprehensive training system with Discord commands
+### 1. **Context-Aware Conversation Threading**
+- **Problem**: Ava lost conversation context between messages (Wes example)
+- **Solution**: ConversationManager tracks:
+  - Message history per phone number
+  - Conversation state and context
+  - Questions asked and responses expected
+  - Ops vs sales pipeline position
+
+### 2. **Operations vs Sales Classification**
+- **Immediate CMO Handoff**: All pricing, quotes, sales inquiries
+- **Ava Operations**: Scheduling, confirmations, logistics, existing client support
+- **Exception Handling**: Add-ons for existing clients (e.g., "+$120 for fridge/oven interior")
+
+### 3. **Natural Language Training System**
+- **Human-like Feedback**: Talk to Ava naturally via Discord DMs
+- **Pattern Learning**: Learns from your corrections and communication style
+- **Continuous Improvement**: Adapts speech patterns, punctuation, conversational tone
+
+### 4. **Multi-Channel Integration**
+- **Google Voice**: Context-aware threading working
+- **High Level**: Ready for real-time conversation monitoring
+- **Unified Experience**: Consistent behavior across all channels
 
 ## 🗣️ **Natural Language Training** (Recommended)
 

@@ -1,53 +1,43 @@
-# 🧠 Grime Guardians AI Model Strategy
+# 🧠 Grime Guardians AI Model Strategy - Operations + Sales Architecture
 
-## 🎯 **Current Setup: GPT-4o-mini for Ava**
+## 🎯 **Updated Architecture: Dual-Agent System**
 
-### **Why GPT-4o-mini for Operations:**
-- ✅ **Cost Efficient**: ~$1-5/month for your message volume
-- ✅ **Fast Response**: Sub-second classification and responses
-- ✅ **Smart Enough**: 85% of GPT-4 performance for routine tasks
-- ✅ **Perfect for**: Message classification, email responses, customer service
+### **Ava (COO) - Pure Operations Focus:**
+- ✅ **Model**: GPT-4o-mini (cost-efficient, fast)
+- ✅ **Scope**: Scheduling, logistics, client management, operational support
+- ✅ **Cost**: ~$1-5/month for message volume
+- ✅ **Autonomy**: 80% confidence auto-responses for operations
 
-### **Current Ava Capabilities (GPT-4o-mini):**
-1. **Message Classification** - Prospect vs schedule change vs complaint
-2. **Response Generation** - Context-appropriate replies
-3. **Training System** - Learning from corrections
-4. **Customer Service** - Empathetic complaint handling
+### **CMO Suite - Sales & Revenue Focus:**
+- 🚀 **Model**: GPT-4o + web search (advanced capabilities)
+- 🚀 **Scope**: Pricing, lead qualification, conversion, market research
+- 🚀 **Cost**: ~$10-30/month for advanced features
+- 🚀 **Tools**: Competitor analysis, real-time pricing, customer research
 
-## 🚀 **Future Sales Agent Suite Strategy**
+## � **Handoff Protocol**
 
-### **When You Need Web Search (GPT-4o Full):**
-```javascript
-// Sales Agent Configuration
-{
-  model: 'gpt-4o',
-  tools: ['web_search'],
-  use_cases: [
-    'Competitor pricing research',
-    'Local market analysis', 
-    'Real-time availability checking',
-    'Customer background research',
-    'Lead qualification with external data'
-  ]
-}
+### **CMO → Ava Transition:**
+```
+Lead Inquiry → CMO (pricing/qualification) → Booking → Ava (operations)
 ```
 
-### **Cost Analysis:**
-- **Ava (GPT-4o-mini)**: $1-5/month for operations
-- **Sales Agent (GPT-4o + web search)**: $10-30/month for advanced features
-- **Total AI budget**: <$50/month for comprehensive automation
+### **Ava Operational Boundaries:**
+- ✅ **Handle**: "What time is my cleaning?", "Can we reschedule?", "Add fridge cleaning (+$120)"
+- ❌ **Route to CMO**: "How much for deep cleaning?", "What's your pricing?", initial inquiries
 
-## 🏗️ **Tiered Architecture**
+## 🧠 **Current Ava Capabilities (GPT-4o-mini):**
 
-### **Tier 1: Operations (Current)**
-- **Agent**: Ava
-- **Model**: GPT-4o-mini
-- **Tasks**: Classification, responses, training
-- **No web search needed**
+### **Context-Aware Conversation Management:**
+1. **Message Threading** - Maintains conversation state per client
+2. **Context Memory** - Remembers questions asked and responses expected
+3. **Pipeline Awareness** - Knows where each conversation stands
+4. **Natural Language Training** - Learns from your feedback in real-time
 
-### **Tier 2: Sales (Future)**
-- **Agent**: Sales Suite
-- **Model**: GPT-4o + web search
+### **Operations Automation:**
+1. **Scheduling Management** - Confirmations, changes, reminders
+2. **Client Communication** - Context-aware responses
+3. **Logistics Coordination** - Team assignments, routing
+4. **Issue Resolution** - Complaint handling with escalation
 - **Tasks**: Lead research, pricing analysis, market intelligence
 - **Web search required**
 
