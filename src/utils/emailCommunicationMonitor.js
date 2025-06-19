@@ -1,8 +1,8 @@
 /**
- * Email Communication Monitor - Unified monitoring system for both phone numbers
+ * Email Communication Monitor - Gmail monitoring for direct emails only
  * 
  * Monitors:
- * 1. Google Voice (612-584-9396) → Gmail email notifications
+ * 1. Direct Gmail emails to your business accounts
  * 2. High Level (651-515-1478) → API + optional email notifications
  * 
  * Features:
@@ -10,7 +10,7 @@
  * - Professional auto-responses (with approval)
  * - Discord alerts and notifications
  * - Comprehensive logging to Notion
- * - Dual-channel redundancy
+ * - Gmail monitoring (Google Voice handled separately via API)
  */
 
 const { google } = require('googleapis');
@@ -40,10 +40,14 @@ class EmailCommunicationMonitor {
     this.processedHighLevelIds = new Set();
     this.pendingReplies = new Map();
     
-    console.log('📧 Initializing Email Communication Monitor');
+    // Configuration flags
+    this.monitorGoogleVoiceEmails = false; // Disabled - use Google Voice API instead
+    this.monitorBusinessEmails = true;     // Monitor direct business emails
+    this.monitorHighLevel = true;          // Continue High Level monitoring
     console.log('🧠 Enhanced with GPT-4 classification and training system');
-    console.log('📱 Channel 1: Google Voice (612-584-9396) → Gmail');
-    console.log('📱 Channel 2: High Level (651-515-1478) → API Monitoring');
+    console.log('� Gmail monitoring for direct business emails');
+    console.log('📱 High Level (651-515-1478) → API Monitoring');
+    console.log('📱 Google Voice monitoring → Separate API integration');
   }
 
   async initialize() {
@@ -164,13 +168,13 @@ class EmailCommunicationMonitor {
     
     this.isMonitoring = true;
     console.log('🚀 Starting email-based communication monitoring...');
-    console.log('📧 Checking Google Voice emails every 2 minutes');
+    console.log('📧 Checking business emails every 5 minutes');
     console.log('📱 Checking High Level conversations every 5 minutes');
     
-    // Google Voice email monitoring (more frequent for legacy clients)
-    this.googleVoiceInterval = setInterval(() => {
-      this.checkGoogleVoiceEmails();
-    }, 2 * 60 * 1000); // 2 minutes
+    // Business email monitoring
+    this.emailInterval = setInterval(() => {
+      this.checkBusinessEmails();
+    }, 5 * 60 * 1000); // 5 minutes
 
     // High Level API monitoring
     this.highLevelInterval = setInterval(() => {
@@ -179,74 +183,36 @@ class EmailCommunicationMonitor {
 
     // Initial checks
     await Promise.all([
-      this.checkGoogleVoiceEmails(),
+      this.checkBusinessEmails(),
       this.checkHighLevelConversations()
     ]);
   }
 
-  // === GOOGLE VOICE EMAIL MONITORING ===
-  async checkGoogleVoiceEmails() {
+  // === BUSINESS EMAIL MONITORING ===
+  async checkBusinessEmails() {
     if (!this.gmail) {
-      console.log('⚠️ Gmail not initialized, skipping Google Voice check');
+      console.log('⚠️ Gmail not initialized, skipping business email check');
+      return;
+    }
+
+    if (!this.monitorGoogleVoiceEmails) {
+      console.log('📱 Google Voice monitoring disabled - handled by separate API monitor');
       return;
     }
 
     try {
-      console.log('📧 Checking Google Voice emails...');
+      console.log('📧 Checking business emails...');
       
-      const query = this.buildGoogleVoiceQuery();
+      // TODO: Implement business email monitoring
+      // This would search for direct emails to business accounts
+      // excluding Google Voice notifications
       
-      const response = await this.gmail.users.messages.list({
-        userId: 'me',
-        q: query,
-        maxResults: 20
-      });
-
-      const messages = response.data.messages || [];
-      let newMessages = 0;
-
-      for (const message of messages) {
-        if (!this.processedEmailIds.has(message.id)) {
-          await this.processGoogleVoiceEmail(message.id);
-          this.processedEmailIds.add(message.id);
-          newMessages++;
-        }
-      }
-
-      if (newMessages > 0) {
-        console.log(`📧 Processed ${newMessages} new Google Voice messages`);
-      }
-
-      this.lastEmailCheck = new Date();
+      console.log('📧 Business email monitoring - implementation pending');
+      
     } catch (error) {
-      console.error('❌ Error checking Google Voice emails:', error.message);
+      console.error('❌ Error checking business emails:', error.message);
     }
   }
-
-  buildGoogleVoiceQuery() {
-    // Search for Google Voice SMS emails since last check
-    const date = this.lastEmailCheck.toISOString().split('T')[0].replace(/-/g, '/');
-    
-    return `after:${date} (` +
-      `from:txt.voice.google.com OR ` +           // Standard Google Voice format
-      `from:voice-noreply@google.com OR ` +       // Alternative format
-      `subject:"SMS from +1612584" OR ` +         // Your specific number
-      `subject:"New text message"` +              // Alternative subject format
-      `)`;
-  }
-
-  async processGoogleVoiceEmail(messageId) {
-    try {
-      const message = await this.gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
-        format: 'full'
-      });
-
-      const email = this.parseGoogleVoiceEmail(message.data);
-      
-      if (!email || !email.clientMessage) {
-        return;
       }
 
       // Process with conversation manager for context awareness

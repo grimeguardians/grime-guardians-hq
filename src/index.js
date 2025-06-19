@@ -89,14 +89,27 @@ client.once('ready', async () => {
   iris.onReady();
   jules.onReady();
   
-  // Initialize email communication monitor
-  console.log('🚀 Initializing email communication monitor...');
+  // Initialize communication monitoring
+  console.log('🚀 Initializing communication monitoring...');
+  
+  // Initialize email monitor (Gmail business emails + High Level)
   const emailInitialized = await emailMonitor.initialize();
   if (emailInitialized) {
     await emailMonitor.startMonitoring();
     console.log('✅ Email communication monitoring started');
   } else {
     console.log('⚠️ Email monitoring failed to initialize - continuing without it');
+  }
+  
+  // Initialize Google Voice API monitor (separate from email)
+  const GoogleVoiceMonitor = require('./src/utils/googleVoiceMonitor');
+  const googleVoiceMonitor = new GoogleVoiceMonitor(client, emailMonitor.conversationManager);
+  const voiceInitialized = await googleVoiceMonitor.initialize();
+  if (voiceInitialized) {
+    await googleVoiceMonitor.startMonitoring();
+    console.log('✅ Google Voice API monitoring started');
+  } else {
+    console.log('📱 Google Voice API monitoring pending - will be enabled when API is configured');
   }
   
   // Initialize database and monitoring systems

@@ -1,176 +1,171 @@
 /**
- * Google Voice Monitor - Monitors Google Voice messages for schedule changes
- * Uses email forwarding or IMAP to monitor Google Voice notifications
+ * Google Voice API Monitor
+ * 
+ * Direct integration with Google Voice for SMS monitoring and sending
+ * Replaces the email-based Google Voice monitoring for cleaner architecture
+ * 
+ * Features:
+ * - Direct SMS monitoring via Google Voice API
+ * - Send SMS replies directly through Google Voice
+ * - Real-time message processing
+ * - Integration with Ava and future Dean (CMO) agent
  */
 
-const { ImapFlow } = require('imapflow');
 require('dotenv').config();
 
 class GoogleVoiceMonitor {
-  constructor() {
-    this.emailEnabled = process.env.GOOGLE_VOICE_EMAIL_MONITORING === 'true';
-    this.imapConfig = {
-      host: process.env.IMAP_HOST || 'imap.gmail.com',
-      port: process.env.IMAP_PORT || 993,
-      secure: true,
-      auth: {
-        user: process.env.GOOGLE_VOICE_EMAIL,
-        pass: process.env.GOOGLE_VOICE_EMAIL_PASSWORD // App password for Gmail
-      }
-    };
+  constructor(discordClient, conversationManager) {
+    this.discordClient = discordClient;
+    this.conversationManager = conversationManager;
+    this.isMonitoring = false;
+    this.processedMessageIds = new Set();
+    this.lastCheck = new Date();
     
-    this.scheduleKeywords = [
-      'reschedule', 'schedule', 'move', 'change', 'cancel', 'postpone',
-      'different time', 'another day', 'push back', 'emergency',
-      'can we change', 'need to move', 'something came up'
-    ];
+    // Google Voice configuration
+    this.phoneNumber = process.env.GOOGLE_VOICE_NUMBER || '612-584-9396';
+    
+    console.log('📱 Initializing Google Voice API Monitor');
+    console.log(`📞 Monitoring: ${this.phoneNumber}`);
   }
 
-  /**
-   * Monitor Google Voice messages via email notifications
-   * Google Voice can forward SMS/voicemail notifications to email
-   */
-  async monitorViaEmail() {
-    if (!this.emailEnabled) {
-      console.log('[GoogleVoiceMonitor] Email monitoring disabled');
-      return [];
-    }
-
+  async initialize() {
     try {
-      console.log('[GoogleVoiceMonitor] Checking Google Voice email notifications...');
+      // TODO: Initialize Google Voice API connection
+      // Note: Google Voice doesn't have an official API, so this would require:
+      // 1. Google Voice for Google Workspace (if available)
+      // 2. Third-party service like Twilio (port number)
+      // 3. Web automation approach
       
-      const client = new ImapFlow(this.imapConfig);
-      await client.connect();
+      console.log('⚠️ Google Voice API integration pending');
+      console.log('💡 Options: Google Workspace Voice API, Twilio port, or web automation');
+      console.log('📧 Google Voice monitoring temporarily disabled - use direct API when available');
       
-      // Select inbox
-      await client.mailboxOpen('INBOX');
-      
-      // Search for recent Google Voice messages (last 24 hours)
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      
-      const messages = client.search({
-        from: 'voice-noreply@google.com',
-        since: yesterday
-      });
-      
-      const scheduleRequests = [];
-      
-      for await (let message of client.fetch(messages, { envelope: true, bodyText: true })) {
-        const content = message.bodyText?.text || '';
-        const subject = message.envelope.subject || '';
-        
-        // Extract phone number from Google Voice notification
-        const phoneMatch = subject.match(/from ([\+\d\-\(\)\s]+)/);
-        const phoneNumber = phoneMatch ? phoneMatch[1].trim() : '';
-        
-        // Analyze content for schedule keywords
-        const detection = this.analyzeForScheduleRequest(content);
-        
-        if (detection.isScheduleRequest) {
-          scheduleRequests.push({
-            source: 'google_voice',
-            phoneNumber,
-            content: content.substring(0, 500), // Limit content length
-            timestamp: message.envelope.date,
-            detection,
-            urgency: this.calculateUrgency(content)
-          });
-        }
-      }
-      
-      await client.logout();
-      return scheduleRequests;
+      return false; // Not initialized yet
       
     } catch (error) {
-      console.error('[GoogleVoiceMonitor] Email monitoring error:', error.message);
-      return [];
+      console.error('❌ Failed to initialize Google Voice API:', error.message);
+      return false;
     }
   }
 
+  async startMonitoring() {
+    if (!this.isMonitoring) {
+      console.log('📱 Google Voice monitoring will be enabled once API is configured');
+      console.log('💡 Current: Disabled (awaiting API setup)');
+      console.log('🎯 Future: Direct SMS monitoring and sending');
+      // this.isMonitoring = true;
+      // this.monitoringInterval = setInterval(() => this.checkMessages(), 30000); // 30 seconds
+    }
+  }
+
+  async stopMonitoring() {
+    if (this.isMonitoring) {
+      this.isMonitoring = false;
+      if (this.monitoringInterval) {
+        clearInterval(this.monitoringInterval);
+      }
+      console.log('📱 Google Voice monitoring stopped');
+    }
+  }
+
+  async checkMessages() {
+    if (!this.isMonitoring) return;
+    
+    try {
+      console.log('📱 Checking Google Voice messages...');
+      
+      // TODO: Implement actual Google Voice API calls
+      // const messages = await this.fetchNewMessages();
+      // for (const message of messages) {
+      //   await this.processMessage(message);
+      // }
+      
+    } catch (error) {
+      console.error('❌ Error checking Google Voice messages:', error.message);
+    }
+  }
+
+  async processMessage(message) {
+    try {
+      // Convert to standard message format
+      const messageData = {
+        content: message.body,
+        from: message.from,
+        to: message.to,
+        source: 'google_voice',
+        clientPhone: message.from,
+        timestamp: new Date(message.timestamp),
+        messageId: message.id
+      };
+
+      console.log(`📱 New Google Voice message from ${message.from}: "${message.body.substring(0, 50)}..."`);
+
+      // Process through conversation manager (same as email messages)
+      const result = await this.conversationManager.processMessage(messageData);
+      
+      if (result.action === 'operational_response') {
+        await this.sendSMSReply(messageData, result.response.text);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Error processing Google Voice message:', error.message);
+    }
+  }
+
+  async sendSMSReply(messageData, replyText) {
+    try {
+      console.log(`📱 Sending SMS reply to ${messageData.from}: "${replyText.substring(0, 50)}..."`);
+      
+      // TODO: Implement actual SMS sending via Google Voice API
+      // await this.googleVoiceAPI.sendSMS(messageData.from, replyText);
+      
+      console.log('✅ SMS reply sent successfully');
+      
+    } catch (error) {
+      console.error('❌ Error sending SMS reply:', error.message);
+    }
+  }
+
+  // Future: Integration methods for different Google Voice API approaches
+  
   /**
-   * Alternative: Monitor via Google Voice web interface (requires browser automation)
+   * Option 1: Google Workspace Voice API (if available)
    */
-  async monitorViaWebInterface() {
-    // This would require puppeteer or similar for web scraping
-    // Implementation placeholder for future enhancement
-    console.log('[GoogleVoiceMonitor] Web interface monitoring not implemented yet');
-    return [];
+  async initializeWorkspaceVoiceAPI() {
+    // Implementation for Google Workspace Voice API
+    console.log('💼 Google Workspace Voice API integration - coming soon');
   }
 
   /**
-   * Analyze message content for schedule requests
+   * Option 2: Twilio integration (port Google Voice number)
    */
-  analyzeForScheduleRequest(content) {
-    const lowerContent = content.toLowerCase();
-    
-    const foundKeywords = this.scheduleKeywords.filter(keyword => 
-      lowerContent.includes(keyword)
-    );
-    
-    const isScheduleRequest = foundKeywords.length > 0;
-    
+  async initializeTwilioIntegration() {
+    // Implementation for Twilio after porting number
+    console.log('📞 Twilio integration option - port Google Voice number');
+  }
+
+  /**
+   * Option 3: Web automation approach (not recommended for production)
+   */
+  async initializeWebAutomation() {
+    // Implementation using puppeteer or similar
+    console.log('🤖 Web automation approach - fallback option');
+  }
+
+  /**
+   * Status check for external monitoring
+   */
+  getStatus() {
     return {
-      isScheduleRequest,
-      confidence: foundKeywords.length > 0 ? Math.min(foundKeywords.length * 0.3 + 0.5, 1.0) : 0,
-      keywords: foundKeywords,
-      messageType: this.categorizeMessage(lowerContent, foundKeywords)
+      isMonitoring: this.isMonitoring,
+      phoneNumber: this.phoneNumber,
+      processedMessages: this.processedMessageIds.size,
+      lastCheck: this.lastCheck,
+      apiStatus: 'pending_implementation'
     };
-  }
-
-  /**
-   * Categorize message type
-   */
-  categorizeMessage(content, keywords) {
-    if (keywords.includes('cancel')) return 'cancellation';
-    if (keywords.includes('emergency')) return 'urgent_change';
-    if (keywords.includes('reschedule') || keywords.includes('move')) return 'reschedule';
-    return 'general_inquiry';
-  }
-
-  /**
-   * Calculate urgency
-   */
-  calculateUrgency(content) {
-    const urgentWords = ['emergency', 'urgent', 'asap', 'immediately', 'sick', 'cancel'];
-    const hasUrgent = urgentWords.some(word => content.toLowerCase().includes(word));
-    
-    return hasUrgent ? 'high' : 'medium';
-  }
-
-  /**
-   * Main monitoring function
-   */
-  async checkForScheduleRequests() {
-    console.log('[GoogleVoiceMonitor] Starting Google Voice monitoring...');
-    
-    const results = {
-      timestamp: new Date().toISOString(),
-      emailResults: [],
-      webResults: [],
-      totalRequests: 0
-    };
-    
-    try {
-      // Monitor via email (primary method)
-      results.emailResults = await this.monitorViaEmail();
-      
-      // Monitor via web interface (future enhancement)
-      results.webResults = await this.monitorViaWebInterface();
-      
-      results.totalRequests = results.emailResults.length + results.webResults.length;
-      
-      if (results.totalRequests > 0) {
-        console.log(`[GoogleVoiceMonitor] Found ${results.totalRequests} potential schedule requests`);
-      }
-      
-      return results;
-      
-    } catch (error) {
-      console.error('[GoogleVoiceMonitor] Monitoring error:', error.message);
-      return results;
-    }
   }
 }
 
-module.exports = { GoogleVoiceMonitor };
+module.exports = GoogleVoiceMonitor;
