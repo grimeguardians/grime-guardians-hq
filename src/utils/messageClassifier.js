@@ -311,41 +311,6 @@ RESPOND ONLY WITH VALID JSON:
   "contextual_factors": ["factor1", "factor2"]
 }`;
   }
-    const prompt = this.buildClassificationPrompt(message, senderInfo);
-    
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 200
-      });
-
-      const result = JSON.parse(response.choices[0].message.content);
-      
-      // Apply type mapping to GPT results too
-      return {
-        type: this.mapToOperationalTypes(result.category),
-        confidence: result.confidence,
-        category: result.category, // Keep original for reference
-        reasoning: result.reasoning,
-        urgency: result.urgency,
-        suggested_response_type: result.suggested_response_type,
-        method: 'gpt4'
-      };
-      
-    } catch (error) {
-      console.error('❌ GPT classification error:', error.message);
-      
-      // Check if it's a rate limit error
-      if (error.status === 429) {
-        console.log('⚠️ OpenAI rate limit hit - using rule-based classification only');
-        console.log('💡 Tip: Add billing method to OpenAI account to remove limits');
-      }
-      
-      throw error;
-    }
-  }
 
   buildClassificationPrompt(message, senderInfo) {
     return `You are an AI assistant for Grime Guardians cleaning service. Classify this message into one of these categories:
