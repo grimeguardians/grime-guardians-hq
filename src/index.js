@@ -102,7 +102,7 @@ client.once('ready', async () => {
   }
   
   // Initialize Google Voice API monitor (separate from email)
-  const GoogleVoiceMonitor = require('./src/utils/googleVoiceMonitor');
+  const GoogleVoiceMonitor = require('./utils/googleVoiceMonitor');
   const googleVoiceMonitor = new GoogleVoiceMonitor(client, emailMonitor.conversationManager);
   const voiceInitialized = await googleVoiceMonitor.initialize();
   if (voiceInitialized) {

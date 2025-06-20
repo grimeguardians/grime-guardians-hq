@@ -291,6 +291,7 @@ CATEGORIES:
 - internal_cleaner: Messages from cleaners/employees (should be handled internally)
 - spam: Irrelevant messages or spam
 
+
 CURRENT MESSAGE: "${message}"
 
 SENDER INFO: ${JSON.stringify(senderInfo)}
