@@ -41,13 +41,13 @@ class EmailCommunicationMonitor {
     this.pendingReplies = new Map();
     
     // Configuration flags
-    this.monitorGoogleVoiceEmails = false; // Disabled - use Google Voice API instead
+    this.monitorGoogleVoiceEmails = true;  // ENABLED - Monitor Google Voice via Gmail
     this.monitorBusinessEmails = true;     // Monitor direct business emails
     this.monitorHighLevel = true;          // Continue High Level monitoring
     console.log('🧠 Enhanced with GPT-4 classification and training system');
-    console.log('� Gmail monitoring for direct business emails');
+    console.log('📧 Gmail monitoring for Google Voice and business emails');
     console.log('📱 High Level (651-515-1478) → API Monitoring');
-    console.log('📱 Google Voice monitoring → Separate API integration');
+    console.log('📱 Google Voice (612-584-9396) → Gmail Integration ACTIVE');
   }
 
   async initialize() {
@@ -195,22 +195,97 @@ class EmailCommunicationMonitor {
       return;
     }
 
-    if (!this.monitorGoogleVoiceEmails) {
-      console.log('📱 Google Voice monitoring disabled - handled by separate API monitor');
-      return;
-    }
-
     try {
-      console.log('📧 Checking business emails...');
+      console.log('📧 Checking Google Voice emails...');
+      console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
-      // TODO: Implement business email monitoring
-      // This would search for direct emails to business accounts
-      // excluding Google Voice notifications
+      // Search for Google Voice SMS notifications
+      const query = 'from:voice-noreply@google.com "SMS from" is:unread';
+      console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
-      console.log('📧 Business email monitoring - implementation pending');
+      const messages = await this.gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+        maxResults: 10
+      });
+
+      console.log(`🔍 DEBUG: Gmail response - ${messages.data.messages?.length || 0} messages found`);
+      
+      if (!messages.data.messages || messages.data.messages.length === 0) {
+        console.log('📧 No new Google Voice messages found');
+        return;
+      }
+
+      console.log(`📧 Found ${messages.data.messages.length} new Google Voice messages - PROCESSING...`);
+      
+      // Process each message
+      for (const messageRef of messages.data.messages) {
+        const email = await this.gmail.users.messages.get({
+          userId: 'me',
+          id: messageRef.id
+        });
+
+        const parsedEmail = this.parseGoogleVoiceEmail(email.data);
+        if (parsedEmail) {
+          await this.processGoogleVoiceMessage(parsedEmail);
+        }
+
+        // Mark as read
+        await this.gmail.users.messages.modify({
+          userId: 'me',
+          id: messageRef.id,
+          resource: {
+            removeLabelIds: ['UNREAD']
+          }
+        });
+      }
+
+      console.log(`📧 Processed ${messages.data.messages.length} new Google Voice messages`);
       
     } catch (error) {
-      console.error('❌ Error checking business emails:', error.message);
+      console.error('❌ Error checking Google Voice emails:', error.message);
+    }
+  }
+
+  /**
+   * Process a Google Voice message through the conversation manager
+   */
+  async processGoogleVoiceMessage(email) {
+    try {
+      console.log(`📞 Processing Google Voice message from ${email.clientPhone}`);
+      console.log(`📝 Message content: "${email.clientMessage.substring(0, 100)}..."`);
+      
+      // Process with conversation manager for context awareness
+      const conversationResult = await this.conversationManager.processMessage({
+        ...email,
+        source: 'google_voice'
+      });
+
+      console.log(`🔄 Conversation result: ${conversationResult.action}`);
+      console.log(`🎯 DEBUG: About to handle action: ${conversationResult.action}`);
+      
+      // Handle based on conversation manager decision
+      if (conversationResult.action === 'ignore_sales_inquiry') {
+        console.log(`🚫 SALES INQUIRY IGNORED - Dean (CMO) will handle this`);
+        console.log(`📋 Reason: ${conversationResult.reason}`);
+        return; // Ava stays silent - Dean's territory
+      } else if (conversationResult.action === 'ignore_non_operational') {
+        console.log(`🚫 NON-OPERATIONAL MESSAGE IGNORED - Dean's territory`);
+        console.log(`📋 Reason: ${conversationResult.reason}`);
+        return; // Ava stays silent - Dean's territory
+      } else if (conversationResult.action === 'operational_response') {
+        await this.handleOperationalResponse(conversationResult);
+        return; // Exit early - Ava handled this
+      } else if (conversationResult.action === 'request_guidance') {
+        await this.handleGuidanceRequest(conversationResult);
+        return; // Exit early - Requested human guidance
+      }
+
+      // If we get here, something went wrong - log it
+      console.log(`⚠️ Unknown conversation result action: ${conversationResult.action}`);
+
+    } catch (error) {
+      console.error('❌ Error processing Google Voice message:', error.message);
     }
   }
 
@@ -417,7 +492,11 @@ class EmailCommunicationMonitor {
 
   async sendApprovalRequest(messageData, replyDraft, messageType = 'Message') {
     try {
+      console.log(`🎯 DEBUG: Sending approval request for ${messageType}`);
+      console.log(`🎯 DEBUG: OPS_LEAD_DISCORD_ID = ${process.env.OPS_LEAD_DISCORD_ID}`);
+      
       const opsLead = await this.discordClient.users.fetch(process.env.OPS_LEAD_DISCORD_ID);
+      console.log(`🎯 DEBUG: Found Discord user: ${opsLead.username}`);
       
       // Choose appropriate color and emoji based on message type
       const colors = {
