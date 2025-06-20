@@ -25,10 +25,30 @@ class MessageClassifier {
     this.loadCorrections();
   }
 
-  async classifyMessage(message, senderInfo = {}) {
+  async classifyMessage(message, senderInfo = {}, conversationHistory = []) {
     try {
-      // First, try rule-based classification
-      const quickClassification = this.quickClassify(message);
+      // Enhanced context for better classification
+      const context = {
+        message,
+        senderInfo,
+        conversationHistory,
+        threadLength: conversationHistory.length
+      };
+
+      // Check if sender is a known cleaner
+      const isCleanerMessage = this.isCleanerSender(senderInfo);
+      if (isCleanerMessage) {
+        console.log('🧹 Cleaner message detected - routing to internal operations');
+        return {
+          type: 'internal_cleaner',
+          confidence: 0.95,
+          method: 'sender_identification',
+          isInternal: true
+        };
+      }
+
+      // First, try rule-based classification with context
+      const quickClassification = this.quickClassifyWithContext(context);
       
       // If confident, return immediately
       if (quickClassification.confidence > 0.8) {
@@ -39,7 +59,7 @@ class MessageClassifier {
       
       // Otherwise, try GPT for deeper analysis (if available)
       try {
-        const gptClassification = await this.gptClassify(message, senderInfo);
+        const gptClassification = await this.gptClassifyWithContext(context);
         console.log(`🤖 GPT classification: ${gptClassification.type} (confidence: ${gptClassification.confidence})`);
         
         // Combine results
@@ -61,6 +81,44 @@ class MessageClassifier {
       console.log(`🔄 Emergency fallback: ${fallback.type} (confidence: ${fallback.confidence})`);
       return fallback;
     }
+  }
+
+  /**
+   * Identify if sender is a known cleaner/employee
+   */
+  isCleanerSender(senderInfo) {
+    const cleanerKeywords = ['🧹', 'cleaner', 'spader', 'david', 'ben', 'team'];
+    const senderName = (senderInfo.name || senderInfo.from || '').toLowerCase();
+    
+    // Check for cleaner emoji or names
+    return cleanerKeywords.some(keyword => senderName.includes(keyword));
+  }
+
+  /**
+   * Enhanced rule-based classification with conversation context
+   */
+  quickClassifyWithContext(context) {
+    const { message, senderInfo, conversationHistory, threadLength } = context;
+    const result = this.quickClassify(message);
+    
+    // Enhance classification with context
+    if (threadLength > 1) {
+      // This is part of an ongoing conversation
+      result.isFollowUp = true;
+      result.confidence += 0.1; // Slightly more confident with context
+      
+      // Check previous messages for context clues
+      const previousMessages = conversationHistory.slice(-3); // Last 3 messages
+      const contextKeywords = previousMessages.join(' ').toLowerCase();
+      
+      if (contextKeywords.includes('reschedule') || contextKeywords.includes('change')) {
+        result.type = 'reschedule_request';
+        result.confidence = Math.min(result.confidence + 0.2, 0.95);
+        result.contextClue = 'previous_reschedule_discussion';
+      }
+    }
+    
+    return result;
   }
 
   quickClassify(message) {
@@ -174,7 +232,85 @@ class MessageClassifier {
     return typeMapping[category] || 'operations';
   }
 
-  async gptClassify(message, senderInfo = {}) {
+  async gptClassifyWithContext(context) {
+    const prompt = this.buildContextualClassificationPrompt(context);
+    
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 300
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      
+      // Apply type mapping to GPT results too
+      return {
+        type: this.mapToOperationalTypes(result.category),
+        confidence: result.confidence,
+        category: result.category, // Keep original for reference
+        reasoning: result.reasoning,
+        urgency: result.urgency,
+        suggested_response_type: result.suggested_response_type,
+        contextual_factors: result.contextual_factors,
+        method: 'gpt4_contextual'
+      };
+      
+    } catch (error) {
+      console.error('❌ GPT classification error:', error.message);
+      
+      // Check if it's a rate limit error
+      if (error.status === 429) {
+        console.log('⚠️ OpenAI rate limit hit - using rule-based classification only');
+        console.log('💡 Tip: Add billing method to OpenAI account to remove limits');
+      }
+      
+      throw error;
+    }
+  }
+
+  buildContextualClassificationPrompt(context) {
+    const { message, senderInfo, conversationHistory, threadLength } = context;
+    
+    let conversationContext = '';
+    if (threadLength > 1) {
+      const recentMessages = conversationHistory.slice(-5).map((msg, index) => 
+        `${index + 1}. ${msg}`
+      ).join('\n');
+      conversationContext = `\n\nCONVERSATION HISTORY (last 5 messages):\n${recentMessages}`;
+    }
+
+    return `You are an AI assistant for Grime Guardians cleaning service. Classify this message considering the full conversation context.
+
+CATEGORIES:
+- new_prospect: Someone inquiring about cleaning services, asking for quotes, or wanting to schedule their first cleaning
+- schedule_change: Existing customer wanting to reschedule, cancel, or change an existing appointment
+- complaint: Customer expressing dissatisfaction, reporting problems, or requesting refunds
+- general: General questions, thanks, or other non-actionable messages from customers
+- internal_cleaner: Messages from cleaners/employees (should be handled internally)
+- spam: Irrelevant messages or spam
+
+CURRENT MESSAGE: "${message}"
+
+SENDER INFO: ${JSON.stringify(senderInfo)}
+THREAD LENGTH: ${threadLength} messages${conversationContext}
+
+IMPORTANT CONTEXT CLUES:
+- If sender has cleaner emoji (🧹) or cleaner names, likely internal
+- If conversation history mentions scheduling, current message likely related
+- Follow-up messages in existing threads have more context
+
+RESPOND ONLY WITH VALID JSON:
+{
+  "category": "category_name",
+  "confidence": 0.85,
+  "reasoning": "Brief explanation including context factors",
+  "urgency": "low|medium|high",
+  "suggested_response_type": "quote|schedule|apology|info|internal|ignore",
+  "contextual_factors": ["factor1", "factor2"]
+}`;
+  }
     const prompt = this.buildClassificationPrompt(message, senderInfo);
     
     try {

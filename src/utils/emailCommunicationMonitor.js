@@ -213,40 +213,6 @@ class EmailCommunicationMonitor {
       console.error('❌ Error checking business emails:', error.message);
     }
   }
-      }
-
-      // Process with conversation manager for context awareness
-      const conversationResult = await this.conversationManager.processMessage({
-        ...email,
-        source: 'google_voice'
-      });
-
-      console.log(`🔄 Conversation result: ${conversationResult.action}`);
-      
-      // Handle based on conversation manager decision
-      if (conversationResult.action === 'ignore_sales_inquiry') {
-        console.log(`🚫 SALES INQUIRY IGNORED - Dean (CMO) will handle this`);
-        console.log(`📋 Reason: ${conversationResult.reason}`);
-        return; // Ava stays silent - Dean's territory
-      } else if (conversationResult.action === 'ignore_non_operational') {
-        console.log(`🚫 NON-OPERATIONAL MESSAGE IGNORED - Dean's territory`);
-        console.log(`📋 Reason: ${conversationResult.reason}`);
-        return; // Ava stays silent - Dean's territory
-      } else if (conversationResult.action === 'operational_response') {
-        await this.handleOperationalResponse(conversationResult);
-        return; // Exit early - Ava handled this
-      } else if (conversationResult.action === 'request_guidance') {
-        await this.handleGuidanceRequest(conversationResult);
-        return; // Exit early - Requested human guidance
-      }
-
-      // If we get here, something went wrong - log it
-      console.log(`⚠️ Unknown conversation result action: ${conversationResult.action}`);
-
-    } catch (error) {
-      console.error('❌ Error processing Google Voice email:', error.message);
-    }
-  }
 
   parseGoogleVoiceEmail(emailData) {
     try {
@@ -839,21 +805,9 @@ Keep under 160 characters for SMS:`;
     
     console.log(`⚙️ Operational response: ${response.confidence}% confidence`);
     
-    if (requiresApproval) {
-      // Send for approval like existing system
-      await this.sendApprovalRequest(messageData, response.text, 'Operational Inquiry');
-    } else {
-      // Auto-send high confidence operational responses
-      console.log(`🚀 Auto-sending operational response (${response.confidence}% confidence)`);
-      await this.sendOperationalReply(messageData, response.text);
-      
-      // Update conversation after sending
-      this.conversationManager.updateConversationAfterResponse(
-        conversation.phoneNumber, 
-        response.text, 
-        true
-      );
-    }
+    // EMERGENCY: ALL responses require approval - no auto-sends
+    console.log(`� EMERGENCY: All responses require manual approval`);
+    await this.sendApprovalRequest(messageData, response.text, 'Operational Inquiry');
   }
 
   /**
