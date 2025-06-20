@@ -129,6 +129,10 @@ class EmailCommunicationMonitor {
       // Set primary gmail client (for backward compatibility)
       this.gmail = this.gmailClients.values().next().value;
       
+      // Log which account is being used for monitoring
+      const primaryEmail = this.gmail?.auth?.credentials?.email || 'unknown';
+      console.log(`📧 Primary Gmail client set for monitoring: ${primaryEmail}`);
+      
       console.log(`✅ Gmail monitoring initialized for ${this.gmailClients.size} email account(s)`);
       
     } catch (error) {
@@ -168,16 +172,18 @@ class EmailCommunicationMonitor {
     
     this.isMonitoring = true;
     console.log('🚀 Starting email-based communication monitoring...');
-    console.log('📧 Checking business emails every 5 minutes');
+    console.log('📧 Checking business emails every 2 minutes (testing mode)');
     console.log('📱 Checking High Level conversations every 5 minutes');
     
-    // Business email monitoring
+    // Business email monitoring - reduced to 2 minutes for faster testing
     this.emailInterval = setInterval(() => {
+      console.log('⏰ INTERVAL TRIGGERED: Checking business emails...');
       this.checkBusinessEmails();
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 2 * 60 * 1000); // 2 minutes for testing
 
     // High Level API monitoring
     this.highLevelInterval = setInterval(() => {
+      console.log('⏰ INTERVAL TRIGGERED: Checking High Level...');
       this.checkHighLevelConversations();
     }, 5 * 60 * 1000); // 5 minutes
 
@@ -190,13 +196,16 @@ class EmailCommunicationMonitor {
 
   // === BUSINESS EMAIL MONITORING ===
   async checkBusinessEmails() {
+    console.log(`🔍 DEBUG: Gmail client exists = ${!!this.gmail}`);
     if (!this.gmail) {
       console.log('⚠️ Gmail not initialized, skipping business email check');
       return;
     }
 
+    const timestamp = new Date().toISOString();
+    console.log(`📧 [${timestamp}] Checking Google Voice emails...`);
+
     try {
-      console.log('📧 Checking Google Voice emails...');
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
       // Search for Google Voice SMS notifications
