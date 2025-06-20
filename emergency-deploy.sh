@@ -38,7 +38,9 @@ pm2 logs grime-guardians --lines 20
 
 echo "=================================================="
 echo "✅ Deployment complete!"
-echo "🔍 Look for: 'EMERGENCY: All responses require manual approval'"
+echo "🔍 Look for: 'Google Voice (612-584-9396) → Gmail Integration ACTIVE'"
+echo "🔍 Look for: 'DEBUG: monitorGoogleVoiceEmails = true'"
+echo "🔍 Look for: 'Found X new Google Voice messages - PROCESSING...'"
 echo "❌ Should NOT see: 'Auto-sending operational response'"
 echo "❌ Should NOT see: 'Cannot find module googleVoiceMonitor'"
 echo "=================================================="
