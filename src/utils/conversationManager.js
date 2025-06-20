@@ -212,7 +212,7 @@ Conversation Context:
       classification,
       response,
       action: 'operational_response',
-      requiresApproval: response.confidence < 80
+      requiresApproval: true // EMERGENCY: All responses require approval
     };
 
     console.log(`⚙️ Operational response generated (${response.confidence}% confidence)`);
