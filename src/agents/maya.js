@@ -3,7 +3,8 @@
 
 const Agent = require('./agent');
 const { checkCleanerPerformance, getCleanerStats } = require('../utils/notion');
-const { sendDiscordPing, createMentionFromUsername } = require('../utils/discord');
+const { sendDiscordPing } = require('../utils/discord');
+const { createMentionFromUsername } = require('../utils/discordUserMapping');
 const { getUserIdFromUsername } = require('../utils/discordUserMapping');
 
 class Maya extends Agent {
@@ -171,10 +172,14 @@ class Maya extends Agent {
 
       const userMemory = memory[username] || { punctuality: [], quality: [] };
       
+      // Ensure arrays exist
+      const punctualityData = userMemory.punctuality || [];
+      const qualityData = userMemory.quality || [];
+      
       // Calculate metrics from Keith's data
       const recentStrikes = {
-        punctuality: userMemory.punctuality.filter(s => this.isWithinDays(s.timestamp, 30)).length,
-        quality: userMemory.quality.filter(s => this.isWithinDays(s.timestamp, 30)).length
+        punctuality: punctualityData.filter(s => this.isWithinDays(s.timestamp, 30)).length,
+        quality: qualityData.filter(s => this.isWithinDays(s.timestamp, 30)).length
       };
 
       return {
