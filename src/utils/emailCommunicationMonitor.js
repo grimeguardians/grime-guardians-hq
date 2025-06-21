@@ -197,22 +197,27 @@ class EmailCommunicationMonitor {
   // === BUSINESS EMAIL MONITORING ===
   async checkBusinessEmails() {
     console.log(`🔍 DEBUG: Gmail client exists = ${!!this.gmail}`);
-    if (!this.gmail) {
-      console.log('⚠️ Gmail not initialized, skipping business email check');
+    
+    // Use the specific Gmail client that has Google Voice linked
+    const googleVoiceGmail = this.gmailClients.get('broberts111592@gmail.com');
+    console.log(`🔍 DEBUG: Google Voice Gmail client exists = ${!!googleVoiceGmail}`);
+    
+    if (!googleVoiceGmail) {
+      console.log('⚠️ Google Voice Gmail account (broberts111592@gmail.com) not initialized, skipping Google Voice check');
       return;
     }
 
     const timestamp = new Date().toISOString();
-    console.log(`📧 [${timestamp}] Checking Google Voice emails...`);
+    console.log(`📧 [${timestamp}] Checking Google Voice emails in broberts111592@gmail.com...`);
 
     try {
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
-      // Search for Google Voice SMS notifications
+      // Search for Google Voice SMS notifications in the correct account
       const query = 'from:voice-noreply@google.com "SMS from" is:unread';
       console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
-      const messages = await this.gmail.users.messages.list({
+      const messages = await googleVoiceGmail.users.messages.list({
         userId: 'me',
         q: query,
         maxResults: 10
@@ -229,7 +234,7 @@ class EmailCommunicationMonitor {
       
       // Process each message
       for (const messageRef of messages.data.messages) {
-        const email = await this.gmail.users.messages.get({
+        const email = await googleVoiceGmail.users.messages.get({
           userId: 'me',
           id: messageRef.id
         });
@@ -240,7 +245,7 @@ class EmailCommunicationMonitor {
         }
 
         // Mark as read
-        await this.gmail.users.messages.modify({
+        await googleVoiceGmail.users.messages.modify({
           userId: 'me',
           id: messageRef.id,
           resource: {
@@ -305,11 +310,16 @@ class EmailCommunicationMonitor {
       const from = headers.find(h => h.name === 'From')?.value || '';
       const date = headers.find(h => h.name === 'Date')?.value || '';
 
+      console.log(`🔍 DEBUG: Email subject = "${subject}"`);
+      console.log(`🔍 DEBUG: Email from = "${from}"`);
+
       // Extract email body
       let content = this.extractEmailBody(emailData.payload);
+      console.log(`🔍 DEBUG: Extracted email content = "${content.substring(0, 200)}..."`);
       
       // Parse Google Voice format
       const clientInfo = this.parseGoogleVoiceContent(subject, content);
+      console.log(`🔍 DEBUG: Parsed client info = ${JSON.stringify(clientInfo, null, 2)}`);
 
       return {
         id: emailData.id,
@@ -332,27 +342,60 @@ class EmailCommunicationMonitor {
   parseGoogleVoiceContent(subject, content) {
     const result = { phone: null, message: null, name: null };
 
+    console.log(`🔍 DEBUG: Parsing Google Voice - Subject: "${subject}"`);
+    console.log(`🔍 DEBUG: Content preview: "${content.substring(0, 200)}..."`);
+
     // Extract phone number from subject: "SMS from +16125849396"
     const phoneMatch = subject.match(/SMS from (\+?\d{10,})/);
     if (phoneMatch) {
       result.phone = phoneMatch[1];
+      console.log(`🔍 DEBUG: Extracted phone: ${result.phone}`);
+    } else {
+      console.log(`🔍 DEBUG: No phone found in subject: "${subject}"`);
     }
 
     // Extract message content - Google Voice emails have specific format
     const lines = content.split('\n');
+    console.log(`🔍 DEBUG: Content has ${lines.length} lines`);
+    
     let messageStartIndex = -1;
     
+    // Look for the actual message content
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('SMS from') || lines[i].trim() === '') {
+      const line = lines[i].trim();
+      console.log(`🔍 DEBUG: Line ${i}: "${line.substring(0, 50)}..."`);
+      
+      // Skip header lines, URLs, and empty lines
+      if (line.includes('voice.google.com') || 
+          line.includes('YOUR ACCOUNT') ||
+          line.includes('HELP CENTER') ||
+          line.includes('SMS from') || 
+          line === '' ||
+          line.startsWith('http')) {
         continue;
       } else {
         messageStartIndex = i;
+        console.log(`🔍 DEBUG: Message starts at line ${i}: "${line}"`);
         break;
       }
     }
     
     if (messageStartIndex >= 0) {
-      result.message = lines.slice(messageStartIndex).join('\n').trim();
+      // Get the actual message content, filtering out URLs and footers
+      const messageLines = lines.slice(messageStartIndex);
+      const cleanedLines = messageLines.filter(line => {
+        const trimmed = line.trim();
+        return trimmed !== '' && 
+               !trimmed.startsWith('http') && 
+               !trimmed.includes('voice.google.com') &&
+               !trimmed.includes('YOUR ACCOUNT') &&
+               !trimmed.includes('HELP CENTER');
+      });
+      
+      result.message = cleanedLines.join('\n').trim();
+      console.log(`🔍 DEBUG: Extracted message: "${result.message}"`);
+    } else {
+      console.log(`🔍 DEBUG: No message content found`);
     }
 
     return result;
