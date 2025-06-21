@@ -214,7 +214,8 @@ class EmailCommunicationMonitor {
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
       // Search for Google Voice SMS notifications in the correct account
-      const query = 'from:voice-noreply@google.com "SMS from" is:unread';
+      // Updated query - Google Voice SMS emails have different subject patterns
+      const query = 'from:voice-noreply@google.com (subject:"SMS" OR subject:"text message") is:unread';
       console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
       const messages = await googleVoiceGmail.users.messages.list({
