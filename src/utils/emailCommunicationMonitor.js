@@ -213,9 +213,8 @@ class EmailCommunicationMonitor {
     try {
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
-      // Search for Google Voice SMS notifications in the correct account
-      // Updated query based on actual format: "New text message from [Name]"
-      const query = 'from:voice-noreply@google.com "New text message from" is:unread';
+      // Search for Google Voice SMS notifications - FILTER OUT SPAM
+      const query = 'from:voice-noreply@google.com "New text message from" is:unread -"verification code" -"Indeed" -"Stripe" -"Discord"';
       console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
       const messages = await googleVoiceGmail.users.messages.list({
@@ -227,13 +226,13 @@ class EmailCommunicationMonitor {
       console.log(`🔍 DEBUG: Gmail response - ${messages.data.messages?.length || 0} messages found`);
       
       if (!messages.data.messages || messages.data.messages.length === 0) {
-        console.log('📧 No new Google Voice messages found');
+        console.log('📧 No new customer Google Voice messages found (spam filtered out)');
         return;
       }
 
-      console.log(`📧 Found ${messages.data.messages.length} new Google Voice messages - PROCESSING...`);
+      console.log(`📧 Found ${messages.data.messages.length} customer Google Voice messages - PROCESSING...`);
       
-      // Process each message
+      // Process each message with additional spam filtering
       for (const messageRef of messages.data.messages) {
         const email = await googleVoiceGmail.users.messages.get({
           userId: 'me',
@@ -241,21 +240,24 @@ class EmailCommunicationMonitor {
         });
 
         const parsedEmail = this.parseGoogleVoiceEmail(email.data);
-        if (parsedEmail) {
+        if (parsedEmail && this.isCustomerMessage(parsedEmail)) {
+          console.log(`✅ CUSTOMER MESSAGE DETECTED from ${parsedEmail.clientName}`);
           await this.processGoogleVoiceMessage(parsedEmail);
+          
+          // Mark as read
+          await googleVoiceGmail.users.messages.modify({
+            userId: 'me',
+            id: messageRef.id,
+            resource: {
+              removeLabelIds: ['UNREAD']
+            }
+          });
+        } else {
+          console.log(`� SPAM/VERIFICATION CODE FILTERED: ${parsedEmail?.subject || 'Unknown'}`);
         }
-
-        // Mark as read
-        await googleVoiceGmail.users.messages.modify({
-          userId: 'me',
-          id: messageRef.id,
-          resource: {
-            removeLabelIds: ['UNREAD']
-          }
-        });
       }
 
-      console.log(`📧 Processed ${messages.data.messages.length} new Google Voice messages`);
+      console.log(`📧 Finished processing customer Google Voice messages`);
       
     } catch (error) {
       console.error('❌ Error checking Google Voice emails:', error.message);
@@ -351,61 +353,46 @@ class EmailCommunicationMonitor {
     if (nameMatch) {
       result.name = nameMatch[1].trim();
       console.log(`🔍 DEBUG: Extracted sender name: "${result.name}"`);
-    } else {
-      console.log(`🔍 DEBUG: No sender name found in subject: "${subject}"`);
     }
 
-    // Extract message content - Google Voice emails have specific format
+    // Extract the actual SMS content - it's usually in the first few lines
     const lines = content.split('\n');
-    console.log(`🔍 DEBUG: Content has ${lines.length} lines`);
+    let messageLines = [];
     
-    let messageContent = '';
-    let actualSenderInfo = '';
-    
-    // Look for the actual message content and sender signature
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      console.log(`🔍 DEBUG: Line ${i}: "${line.substring(0, 50)}..."`);
+    for (const line of lines) {
+      const trimmedLine = line.trim();
       
-      // Skip empty lines and URLs
-      if (line === '' || line.startsWith('http') || line.includes('voice.google.com')) {
+      // Skip empty lines and Google Voice URLs
+      if (!trimmedLine || trimmedLine.startsWith('http') || trimmedLine.includes('voice.google.com')) {
         continue;
       }
       
-      // Skip Google Voice footer text
-      if (line.includes('YOUR ACCOUNT') || 
-          line.includes('HELP CENTER') ||
-          line.includes('voice.google.com')) {
-        continue;
+      // Skip Google Voice footer content
+      if (trimmedLine.includes('YOUR ACCOUNT') || 
+          trimmedLine.includes('HELP CENTER') ||
+          trimmedLine.includes('This email was sent') ||
+          trimmedLine.includes('Google LLC') ||
+          trimmedLine.includes('Mountain View')) {
+        break; // Stop processing when we hit the footer
       }
       
-      // Look for sender signature (- Name format) - this often contains the actual sender info
-      if (line.startsWith('- ') && line.length < 50) {
-        actualSenderInfo = line.substring(2).trim();
-        console.log(`🔍 DEBUG: Found sender signature: "${actualSenderInfo}"`);
-        continue;
-      }
-      
-      // Accumulate message content (everything else that's not a footer/URL)
-      messageContent += line + '\n';
+      // This is likely the actual message content
+      messageLines.push(trimmedLine);
     }
     
-    // Clean up message content
-    result.message = messageContent.trim();
+    // Join the message lines and clean up
+    result.message = messageLines.join(' ').trim();
     
-    // Use actual sender info if available, otherwise use name from subject
-    if (actualSenderInfo) {
-      result.name = actualSenderInfo;
+    // Use sender name from subject or fallback
+    if (!result.name) {
+      result.name = 'Unknown Customer';
     }
     
-    // For Google Voice, we need the actual sender's phone number
-    // For now, we'll extract it from content if possible, or use a placeholder
-    // The actual sender's phone might be in the content or we might need to parse it differently
-    result.phone = result.name || 'Unknown'; // We'll use name as identifier for now
+    // For now, use the sender name as phone identifier
+    result.phone = result.name;
     
     console.log(`🔍 DEBUG: Final extracted message: "${result.message}"`);
     console.log(`🔍 DEBUG: Final sender name: "${result.name}"`);
-    console.log(`🔍 DEBUG: Phone/identifier: "${result.phone}"`);
 
     return result;
   }
@@ -424,6 +411,74 @@ class EmailCommunicationMonitor {
     }
     
     return body;
+  }
+
+  /**
+   * Determine if a Google Voice message is from a real customer (not spam/verification)
+   */
+  isCustomerMessage(parsedEmail) {
+    const message = parsedEmail.clientMessage.toLowerCase();
+    const subject = parsedEmail.subject.toLowerCase();
+    const senderName = parsedEmail.clientName.toLowerCase();
+    
+    // Filter out verification codes and automated messages
+    const spamKeywords = [
+      'verification code',
+      'verification pin',
+      'confirm your',
+      'activate your',
+      'security code',
+      'login code',
+      'indeed',
+      'stripe',
+      'discord',
+      'facebook',
+      'google',
+      'amazon',
+      'paypal',
+      'venmo',
+      'zelle'
+    ];
+    
+    // Check if message contains spam keywords
+    for (const keyword of spamKeywords) {
+      if (message.includes(keyword) || subject.includes(keyword)) {
+        console.log(`🚫 Filtered out: Contains spam keyword "${keyword}"`);
+        return false;
+      }
+    }
+    
+    // Filter out numeric-only sender names (usually verification services)
+    if (/^\d{4,6}$/.test(senderName)) {
+      console.log(`🚫 Filtered out: Numeric sender "${senderName}" (likely verification service)`);
+      return false;
+    }
+    
+    // Check for legitimate cleaning-related content
+    const cleaningKeywords = [
+      'clean', 'appointment', 'schedule', 'reschedule', 'cancel',
+      'service', 'house', 'home', 'tomorrow', 'today', 'friday',
+      'monday', 'tuesday', 'wednesday', 'thursday', 'saturday', 'sunday'
+    ];
+    
+    const hasCleaningContent = cleaningKeywords.some(keyword => 
+      message.includes(keyword) || subject.includes(keyword)
+    );
+    
+    if (hasCleaningContent) {
+      console.log(`✅ Customer message detected: Contains cleaning-related content`);
+      return true;
+    }
+    
+    // If it's not obvious spam and doesn't contain verification codes, 
+    // it might be a legitimate customer inquiry
+    if (message.length > 10 && !message.includes('http')) {
+      console.log(`✅ Potential customer message: Not obvious spam, reasonable length`);
+      return true;
+    }
+    
+    console.log(`🚫 Filtered out: Does not appear to be customer communication`);
+    return false;
   }
 
   // === HIGH LEVEL CONVERSATION MONITORING ===
