@@ -214,8 +214,8 @@ class EmailCommunicationMonitor {
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
       // Search for Google Voice SMS notifications in the correct account
-      // Updated query - Google Voice SMS emails have different subject patterns
-      const query = 'from:voice-noreply@google.com (subject:"SMS" OR subject:"text message") is:unread';
+      // Updated query based on actual format: "New text message from [Name]"
+      const query = 'from:voice-noreply@google.com "New text message from" is:unread';
       console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
       const messages = await googleVoiceGmail.users.messages.list({
@@ -346,58 +346,66 @@ class EmailCommunicationMonitor {
     console.log(`🔍 DEBUG: Parsing Google Voice - Subject: "${subject}"`);
     console.log(`🔍 DEBUG: Content preview: "${content.substring(0, 200)}..."`);
 
-    // Extract phone number from subject: "SMS from +16125849396"
-    const phoneMatch = subject.match(/SMS from (\+?\d{10,})/);
-    if (phoneMatch) {
-      result.phone = phoneMatch[1];
-      console.log(`🔍 DEBUG: Extracted phone: ${result.phone}`);
+    // Extract sender name from subject: "New text message from [Name]"
+    const nameMatch = subject.match(/New text message from (.+)/);
+    if (nameMatch) {
+      result.name = nameMatch[1].trim();
+      console.log(`🔍 DEBUG: Extracted sender name: "${result.name}"`);
     } else {
-      console.log(`🔍 DEBUG: No phone found in subject: "${subject}"`);
+      console.log(`🔍 DEBUG: No sender name found in subject: "${subject}"`);
     }
 
     // Extract message content - Google Voice emails have specific format
     const lines = content.split('\n');
     console.log(`🔍 DEBUG: Content has ${lines.length} lines`);
     
-    let messageStartIndex = -1;
+    let messageContent = '';
+    let actualSenderInfo = '';
     
-    // Look for the actual message content
+    // Look for the actual message content and sender signature
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       console.log(`🔍 DEBUG: Line ${i}: "${line.substring(0, 50)}..."`);
       
-      // Skip header lines, URLs, and empty lines
-      if (line.includes('voice.google.com') || 
-          line.includes('YOUR ACCOUNT') ||
-          line.includes('HELP CENTER') ||
-          line.includes('SMS from') || 
-          line === '' ||
-          line.startsWith('http')) {
+      // Skip empty lines and URLs
+      if (line === '' || line.startsWith('http') || line.includes('voice.google.com')) {
         continue;
-      } else {
-        messageStartIndex = i;
-        console.log(`🔍 DEBUG: Message starts at line ${i}: "${line}"`);
-        break;
       }
+      
+      // Skip Google Voice footer text
+      if (line.includes('YOUR ACCOUNT') || 
+          line.includes('HELP CENTER') ||
+          line.includes('voice.google.com')) {
+        continue;
+      }
+      
+      // Look for sender signature (- Name format) - this often contains the actual sender info
+      if (line.startsWith('- ') && line.length < 50) {
+        actualSenderInfo = line.substring(2).trim();
+        console.log(`🔍 DEBUG: Found sender signature: "${actualSenderInfo}"`);
+        continue;
+      }
+      
+      // Accumulate message content (everything else that's not a footer/URL)
+      messageContent += line + '\n';
     }
     
-    if (messageStartIndex >= 0) {
-      // Get the actual message content, filtering out URLs and footers
-      const messageLines = lines.slice(messageStartIndex);
-      const cleanedLines = messageLines.filter(line => {
-        const trimmed = line.trim();
-        return trimmed !== '' && 
-               !trimmed.startsWith('http') && 
-               !trimmed.includes('voice.google.com') &&
-               !trimmed.includes('YOUR ACCOUNT') &&
-               !trimmed.includes('HELP CENTER');
-      });
-      
-      result.message = cleanedLines.join('\n').trim();
-      console.log(`🔍 DEBUG: Extracted message: "${result.message}"`);
-    } else {
-      console.log(`🔍 DEBUG: No message content found`);
+    // Clean up message content
+    result.message = messageContent.trim();
+    
+    // Use actual sender info if available, otherwise use name from subject
+    if (actualSenderInfo) {
+      result.name = actualSenderInfo;
     }
+    
+    // For Google Voice, we need the actual sender's phone number
+    // For now, we'll extract it from content if possible, or use a placeholder
+    // The actual sender's phone might be in the content or we might need to parse it differently
+    result.phone = result.name || 'Unknown'; // We'll use name as identifier for now
+    
+    console.log(`🔍 DEBUG: Final extracted message: "${result.message}"`);
+    console.log(`🔍 DEBUG: Final sender name: "${result.name}"`);
+    console.log(`🔍 DEBUG: Phone/identifier: "${result.phone}"`);
 
     return result;
   }
