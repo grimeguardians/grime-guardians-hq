@@ -214,7 +214,8 @@ class EmailCommunicationMonitor {
       console.log(`🔍 DEBUG: monitorGoogleVoiceEmails = ${this.monitorGoogleVoiceEmails}`);
       
       // Search for Google Voice SMS notifications - FILTER OUT SPAM
-      const query = 'from:voice-noreply@google.com "New text message from" is:unread -"verification code" -"Indeed" -"Stripe" -"Discord"';
+      // Updated to catch all text message formats while filtering spam short codes
+      const query = 'from:voice-noreply@google.com ("New text message" OR "New group message") is:unread -"verification code" -"Indeed" -"Stripe" -"Discord" -from:31061 -from:22395 -from:65161';
       console.log(`🔍 DEBUG: Gmail query = ${query}`);
       
       const messages = await googleVoiceGmail.users.messages.list({
@@ -348,10 +349,18 @@ class EmailCommunicationMonitor {
     console.log(`🔍 DEBUG: Parsing Google Voice - Subject: "${subject}"`);
     console.log(`🔍 DEBUG: Content preview: "${content.substring(0, 200)}..."`);
 
-    // Extract sender name from subject: "New text message from [Name]"
-    const nameMatch = subject.match(/New text message from (.+)/);
+    // Extract sender name from subject - handle both individual and group messages
+    let nameMatch = subject.match(/New text message from (.+)/);
+    if (!nameMatch) {
+      nameMatch = subject.match(/New group message from (.+)/);
+    }
+    
     if (nameMatch) {
       result.name = nameMatch[1].trim();
+      // Remove trailing period if present
+      if (result.name.endsWith('.')) {
+        result.name = result.name.slice(0, -1);
+      }
       console.log(`🔍 DEBUG: Extracted sender name: "${result.name}"`);
     }
 
@@ -451,6 +460,13 @@ class EmailCommunicationMonitor {
     // Filter out numeric-only sender names (usually verification services)
     if (/^\d{4,6}$/.test(senderName)) {
       console.log(`🚫 Filtered out: Numeric sender "${senderName}" (likely verification service)`);
+      return false;
+    }
+    
+    // Filter out known spam short codes we've seen in the Gmail history
+    const spamShortCodes = ['31061', '22395', '65161'];
+    if (spamShortCodes.includes(senderName)) {
+      console.log(`🚫 Filtered out: Known spam short code "${senderName}"`);
       return false;
     }
     
