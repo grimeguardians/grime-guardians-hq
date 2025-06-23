@@ -4,6 +4,7 @@ const Ava = require('./agents/ava');
 const KeithEnhanced = require('./agents/keithEnhanced');
 const ScheduleManager = require('./agents/scheduleManager');
 const EmailCommunicationMonitor = require('./utils/emailCommunicationMonitor');
+const GrimeGuardiansGmailAgent = require('./agents/langchain/GrimeGuardiansGmailAgent');
 const Maya = require('./agents/maya');
 const Zara = require('./agents/zara');
 const Nikolai = require('./agents/nikolai');
@@ -40,7 +41,8 @@ const coordinator = new AgentCoordinator();
 const ava = new Ava(client);
 const keith = new KeithEnhanced(client);
 const scheduleManager = new ScheduleManager(client);
-const emailMonitor = new EmailCommunicationMonitor(client);
+const langchainAgent = new GrimeGuardiansGmailAgent();
+const emailMonitor = new EmailCommunicationMonitor(client, langchainAgent);
 const maya = new Maya(client);
 const zara = new Zara(client);
 const nikolai = new Nikolai(client);
@@ -52,6 +54,12 @@ const agentRegistry = [
   { agentId: 'ava', instance: ava, getContext: (msg) => ava.getContext ? ava.getContext(msg) : {}, handleEvent: (msg, ctx) => ava.handleMessage(msg) },
   { agentId: 'keith', instance: keith, getContext: (msg) => keith.getContext ? keith.getContext(msg) : {}, handleEvent: (msg, ctx) => keith.handleMessage(msg) },
   { agentId: 'scheduleManager', instance: scheduleManager, getContext: (msg) => scheduleManager.getContext ? scheduleManager.getContext(msg) : {}, handleEvent: (msg, ctx) => scheduleManager.handleMessage(msg) },
+  { agentId: 'langchain', instance: langchainAgent, getContext: (msg) => ({}), handleEvent: (msg, ctx) => langchainAgent.analyzeMessage({
+    subject: `Discord message from ${msg.author?.username}`,
+    from: msg.author?.username || 'unknown',
+    body: msg.content,
+    timestamp: new Date().toISOString()
+  }) },
   { agentId: 'maya', instance: maya, getContext: (msg) => maya.getContext(msg), handleEvent: (msg, ctx) => maya.handleEvent(msg, ctx) },
   { agentId: 'zara', instance: zara, getContext: (msg) => zara.getContext(msg), handleEvent: (msg, ctx) => zara.handleEvent(msg, ctx) },
   { agentId: 'nikolai', instance: nikolai, getContext: (msg) => nikolai.getContext(msg), handleEvent: (msg, ctx) => nikolai.handleEvent(msg, ctx) },
@@ -83,6 +91,12 @@ client.once('ready', async () => {
   ava.onReady();
   keith.onReady();
   scheduleManager.onReady();
+  
+  // Initialize LangChain Agent
+  console.log('🧠 Initializing LangChain Gmail Agent...');
+  await langchainAgent.initialize();
+  console.log('✅ LangChain Gmail Agent is ready!');
+  
   maya.onReady();
   zara.onReady();
   nikolai.onReady();

@@ -23,10 +23,11 @@ const ConversationManager = require('./conversationManager');
 require('dotenv').config();
 
 class EmailCommunicationMonitor {
-  constructor(client) {
+  constructor(client, langchainAgent = null) {
     this.discordClient = client;
     this.gmail = null;
     this.isMonitoring = false;
+    this.langchainAgent = langchainAgent; // LangChain integration
     
     // Enhanced AI components
     this.messageClassifier = new MessageClassifier();
@@ -41,9 +42,9 @@ class EmailCommunicationMonitor {
     this.pendingReplies = new Map();
     
     // Configuration flags
-    this.monitorGoogleVoiceEmails = false; // Disabled - use Google Voice API instead
-    this.monitorBusinessEmails = true;     // Monitor direct business emails
-    this.monitorHighLevel = true;          // Continue High Level monitoring
+    this.monitorGoogleVoiceEmails = true;     // ENABLED - Monitor Google Voice emails via Gmail
+    this.monitorBusinessEmails = true;        // Monitor direct business emails
+    this.monitorHighLevel = true;             // Continue High Level monitoring
     console.log('🧠 Enhanced with GPT-4 classification and training system');
     console.log('� Gmail monitoring for direct business emails');
     console.log('📱 High Level (651-515-1478) → API Monitoring');
@@ -168,18 +169,18 @@ class EmailCommunicationMonitor {
     
     this.isMonitoring = true;
     console.log('🚀 Starting email-based communication monitoring...');
-    console.log('📧 Checking business emails every 5 minutes');
-    console.log('📱 Checking High Level conversations every 5 minutes');
+    console.log('📧 Checking business emails every 1 minute (TESTING MODE)');
+    console.log('📱 Checking High Level conversations every 1 minute (TESTING MODE)');
     
-    // Business email monitoring
+    // Business email monitoring - TESTING: 1 minute interval
     this.emailInterval = setInterval(() => {
       this.checkBusinessEmails();
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 1 * 60 * 1000); // 1 minute for testing
 
-    // High Level API monitoring
+    // High Level API monitoring - TESTING: 1 minute interval
     this.highLevelInterval = setInterval(() => {
       this.checkHighLevelConversations();
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 1 * 60 * 1000); // 1 minute for testing
 
     // Initial checks
     await Promise.all([
@@ -201,16 +202,151 @@ class EmailCommunicationMonitor {
     }
 
     try {
-      console.log('📧 Checking business emails...');
+      console.log('📧 Checking Google Voice emails...');
       
-      // TODO: Implement business email monitoring
-      // This would search for direct emails to business accounts
-      // excluding Google Voice notifications
-      
-      console.log('📧 Business email monitoring - implementation pending');
+      // Check Google Voice emails using broberts111592@gmail.com account
+      await this.checkGoogleVoiceEmails();
       
     } catch (error) {
       console.error('❌ Error checking business emails:', error.message);
+    }
+  }
+
+  async checkGoogleVoiceEmails() {
+    try {
+      // Use broberts111592@gmail.com for Google Voice monitoring
+      const googleVoiceAccount = 'broberts111592@gmail.com';
+      
+      if (!this.gmailClients.has(googleVoiceAccount)) {
+        console.log(`⚠️ Gmail account ${googleVoiceAccount} not initialized`);
+        return;
+      }
+
+      const gmail = this.gmailClients.get(googleVoiceAccount);
+      
+      // Search for unread Google Voice messages
+      const query = 'from:voice-noreply@google.com ("New text message" OR "New group message") is:unread';
+      
+      const messages = await gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+        maxResults: 10
+      });
+
+      if (!messages.data.messages || messages.data.messages.length === 0) {
+        return; // No new messages
+      }
+
+      console.log(`📱 Found ${messages.data.messages.length} new Google Voice messages`);
+
+      for (const messageRef of messages.data.messages) {
+        if (this.processedEmailIds.has(messageRef.id)) {
+          continue;
+        }
+
+        const email = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageRef.id
+        });
+
+        const parsedMessage = this.parseGoogleVoiceEmail(email.data);
+        
+        if (parsedMessage && parsedMessage.clientMessage) {
+          console.log(`📱 Processing Google Voice message from: ${parsedMessage.clientPhone}`);
+          
+          // Send Discord DM to ops lead
+          await this.sendGoogleVoiceAlert(parsedMessage);
+          
+          // Integrate with LangChain agent for analysis
+          if (this.langchainAgent) {
+            await this.analyzeSMSWithLangChain(parsedMessage);
+          }
+          
+          // Mark as read
+          await gmail.users.messages.modify({
+            userId: 'me',
+            id: messageRef.id,
+            resource: {
+              removeLabelIds: ['UNREAD']
+            }
+          });
+        }
+
+        this.processedEmailIds.add(messageRef.id);
+      }
+
+      console.log(`📧 Processed ${messages.data.messages.length} new Google Voice messages`);
+
+    } catch (error) {
+      console.error('❌ Error checking Google Voice emails:', error.message);
+    }
+  }
+
+  async sendGoogleVoiceAlert(messageData) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) {
+        console.log('⚠️ No ops lead Discord ID configured');
+        return;
+      }
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      if (!user) {
+        console.log('❌ Could not find ops lead user');
+        return;
+      }
+
+      const alertMessage = `🚨 **New SMS via Google Voice (612-584-9396)**\n\n` +
+        `📞 **From:** ${messageData.clientPhone || 'Unknown'}\n` +
+        `👤 **Name:** ${messageData.clientName || 'Not provided'}\n` +
+        `💬 **Message:** ${messageData.clientMessage}\n` +
+        `⏰ **Time:** ${messageData.date?.toLocaleString() || 'Unknown'}\n\n` +
+        `**Action Required:** Review and respond as needed`;
+
+      await user.send(alertMessage);
+      console.log(`✅ Google Voice alert sent to ops lead`);
+
+    } catch (error) {
+      console.error('❌ Error sending Google Voice alert:', error.message);
+    }
+  }
+
+  async analyzeSMSWithLangChain(messageData) {
+    try {
+      if (!this.langchainAgent) {
+        return;
+      }
+
+      const analysis = await this.langchainAgent.analyzeMessage({
+        subject: `SMS from ${messageData.clientPhone}`,
+        from: messageData.clientPhone || 'unknown',
+        body: messageData.clientMessage,
+        timestamp: messageData.date?.toISOString() || new Date().toISOString()
+      });
+
+      console.log(`🧠 LangChain SMS Analysis:`, {
+        messageType: analysis.message_type,
+        urgency: analysis.urgency_level,
+        confidence: analysis.confidence
+      });
+
+      // Send enhanced analysis to Discord if urgent
+      if (analysis.urgency_level === 'critical' || analysis.urgency_level === 'high') {
+        const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+        const user = await this.discordClient.users.fetch(opsLeadId);
+        
+        const enhancedAlert = `🧠 **LangChain Analysis - HIGH PRIORITY**\n\n` +
+          `📊 **Type:** ${analysis.message_type}\n` +
+          `⚡ **Urgency:** ${analysis.urgency_level}\n` +
+          `🎯 **Confidence:** ${(analysis.confidence * 100).toFixed(0)}%\n` +
+          `💡 **Reasoning:** ${analysis.reasoning || 'Auto-classified by AI'}`;
+        
+        await user.send(enhancedAlert);
+        console.log(`🧠 Enhanced LangChain alert sent for urgent SMS`);
+      }
+
+    } catch (error) {
+      console.error('❌ Error analyzing SMS with LangChain:', error.message);
     }
   }
 
