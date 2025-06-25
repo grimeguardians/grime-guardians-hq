@@ -60,7 +60,7 @@ const agentRegistry = [
     body: msg.content,
     timestamp: new Date().toISOString()
   }) },
-  { agentId: 'maya', instance: maya, getContext: (msg) => maya.getContext(msg), handleEvent: (msg, ctx) => maya.handleEvent(msg, ctx) },
+  // { agentId: 'maya', instance: maya, getContext: (msg) => maya.getContext(msg), handleEvent: (msg, ctx) => maya.handleEvent(msg, ctx) }, // TEMPORARILY DISABLED
   { agentId: 'zara', instance: zara, getContext: (msg) => zara.getContext(msg), handleEvent: (msg, ctx) => zara.handleEvent(msg, ctx) },
   { agentId: 'nikolai', instance: nikolai, getContext: (msg) => nikolai.getContext(msg), handleEvent: (msg, ctx) => nikolai.handleEvent(msg, ctx) },
   { agentId: 'iris', instance: iris, getContext: (msg) => iris.getContext(msg), handleEvent: (msg, ctx) => iris.handleEvent(msg, ctx) },
@@ -97,7 +97,7 @@ client.once('ready', async () => {
   await langchainAgent.initialize();
   console.log('✅ LangChain Gmail Agent is ready!');
   
-  maya.onReady();
+  // maya.onReady(); // TEMPORARILY DISABLED - Maya was spamming Discord with test data
   zara.onReady();
   nikolai.onReady();
   iris.onReady();
@@ -342,7 +342,14 @@ client.on('messageReactionAdd', async (reaction, user) => {
       
       if (emoji === '✅' || emoji === '❌') {
         console.log(`[EmailMonitor] Processing reply approval reaction: ${emoji} from user ${user.id}`);
-        await emailMonitor.handleApprovalReaction(reaction.message.id, emoji, user.id);
+        
+        // Try Google Voice approval first (for SMS replies)
+        const googleVoiceHandled = await emailMonitor.handleGoogleVoiceApproval(reaction.message.id, emoji, user.id);
+        
+        // If not handled by Google Voice, try regular email approval
+        if (!googleVoiceHandled) {
+          await emailMonitor.handleApprovalReaction(reaction.message.id, emoji, user.id);
+        }
       }
     }
 
@@ -472,6 +479,83 @@ app.post(WEBHOOK_PATH, async (req, res) => {
 app.listen(WEBHOOK_PORT, () => {
   console.log(`[Express] Webhook server listening on port ${WEBHOOK_PORT}`);
   console.log(`[Express] POST endpoint: http://localhost:${WEBHOOK_PORT}${WEBHOOK_PATH}`);
+});
+
+// High Level OAuth callback route
+app.get('/oauth/callback/gohighlevel', async (req, res) => {
+  try {
+    const { code, error } = req.query;
+    
+    if (error) {
+      console.error('[High Level OAuth] Authorization error:', error);
+      return res.status(400).send(`Authorization failed: ${error}`);
+    }
+    
+    if (!code) {
+      return res.status(400).send('Authorization code not found');
+    }
+    
+    console.log('[High Level OAuth] Received authorization code, exchanging for tokens...');
+    
+    // Import OAuth handler
+    const HighLevelOAuth = require('./utils/highlevelOAuth');
+    const oauth = new HighLevelOAuth();
+    
+    // Exchange code for tokens
+    const tokens = await oauth.exchangeCodeForTokens(code);
+    
+    console.log('✅ [High Level OAuth] Tokens obtained successfully!');
+    console.log(`   - Access Token: ${tokens.access_token ? 'Present' : 'Missing'}`);
+    console.log(`   - Refresh Token: ${tokens.refresh_token ? 'Present' : 'Missing'}`);
+    console.log(`   - Expires In: ${tokens.expires_in} seconds`);
+    
+    // Test the new tokens by getting conversations
+    try {
+      const conversations = await oauth.getConversations();
+      console.log(`✅ [High Level OAuth] Successfully tested API - found ${conversations.length} conversations`);
+      
+      res.send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>✅ High Level OAuth Setup Complete!</h2>
+            <p><strong>Status:</strong> Successfully connected to High Level</p>
+            <p><strong>Conversations Found:</strong> ${conversations.length}</p>
+            <p><strong>Access Token:</strong> Active (expires in ${Math.floor(tokens.expires_in / 3600)} hours)</p>
+            <br>
+            <p>🚀 Your Grime Guardians system can now monitor High Level SMS messages!</p>
+            <p>You can close this window and return to your system.</p>
+          </body>
+        </html>
+      `);
+      
+      // Notify ops lead via Discord
+      try {
+        const user = await client.users.fetch(process.env.DISCORD_OPS_LEAD_ID);
+        await user.send('🎉 **High Level OAuth Setup Complete!**\n\n✅ Successfully connected to High Level API\n📱 SMS monitoring now active for 651-515-1478\n🔄 System will automatically refresh tokens as needed');
+      } catch (dmError) {
+        console.error('[High Level OAuth] Failed to send Discord notification:', dmError.message);
+      }
+      
+    } catch (testError) {
+      console.error('[High Level OAuth] API test failed:', testError.message);
+      res.send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>⚠️ High Level OAuth Partial Success</h2>
+            <p><strong>Tokens:</strong> Obtained successfully</p>
+            <p><strong>API Test:</strong> Failed - ${testError.message}</p>
+            <br>
+            <p>The OAuth flow completed, but there might be an issue with API permissions or scopes.</p>
+            <p>Please check your app configuration in the High Level developer portal.</p>
+          </body>
+        </html>
+      `);
+    }
+    
+  } catch (error) {
+    console.error('[High Level OAuth] Callback error:', error.message);
+    res.status(500).send(`OAuth callback failed: ${error.message}`);
+  }
 });
 
 // Gmail OAuth callback route

@@ -40,6 +40,7 @@ class EmailCommunicationMonitor {
     this.processedEmailIds = new Set();
     this.processedHighLevelIds = new Set();
     this.pendingReplies = new Map();
+    this.pendingGoogleVoiceReplies = new Map(); // NEW: For Google Voice approvals
     
     // Configuration flags
     this.monitorGoogleVoiceEmails = true;     // ENABLED - Monitor Google Voice emails via Gmail
@@ -224,8 +225,15 @@ class EmailCommunicationMonitor {
 
       const gmail = this.gmailClients.get(googleVoiceAccount);
       
-      // Search for unread Google Voice messages
-      const query = 'from:voice-noreply@google.com ("New text message" OR "New group message") is:unread';
+      // Calculate date filter for last 2 hours only
+      const twoHoursAgo = new Date();
+      twoHoursAgo.setHours(twoHoursAgo.getHours() - 2);
+      const dateFilter = twoHoursAgo.toISOString().split('T')[0].replace(/-/g, '/'); // Format: YYYY/MM/DD
+      
+      // Search for Google Voice messages from last 2 hours only
+      const query = `from:@txt.voice.google.com subject:("New text message from") after:${dateFilter} is:unread`;
+      
+      console.log(`🔍 Searching Gmail with query: ${query}`);
       
       const messages = await gmail.users.messages.list({
         userId: 'me',
@@ -254,13 +262,14 @@ class EmailCommunicationMonitor {
         if (parsedMessage && parsedMessage.clientMessage) {
           console.log(`📱 Processing Google Voice message from: ${parsedMessage.clientPhone}`);
           
-          // Send Discord DM to ops lead
-          await this.sendGoogleVoiceAlert(parsedMessage);
-          
-          // Integrate with LangChain agent for analysis
+          // Analyze with LangChain first, then send enhanced Discord DM
+          let analysis = null;
           if (this.langchainAgent) {
-            await this.analyzeSMSWithLangChain(parsedMessage);
+            analysis = await this.analyzeSMSWithLangChain(parsedMessage);
           }
+          
+          // Send enhanced Discord DM to ops lead
+          await this.sendGoogleVoiceAlert(parsedMessage, analysis);
           
           // Mark as read
           await gmail.users.messages.modify({
@@ -282,7 +291,7 @@ class EmailCommunicationMonitor {
     }
   }
 
-  async sendGoogleVoiceAlert(messageData) {
+  async sendGoogleVoiceAlert(messageData, analysis = null) {
     try {
       const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
       if (!opsLeadId) {
@@ -296,15 +305,75 @@ class EmailCommunicationMonitor {
         return;
       }
 
-      const alertMessage = `🚨 **New SMS via Google Voice (612-584-9396)**\n\n` +
-        `📞 **From:** ${messageData.clientPhone || 'Unknown'}\n` +
-        `👤 **Name:** ${messageData.clientName || 'Not provided'}\n` +
-        `💬 **Message:** ${messageData.clientMessage}\n` +
-        `⏰ **Time:** ${messageData.date?.toLocaleString() || 'Unknown'}\n\n` +
-        `**Action Required:** Review and respond as needed`;
+      // Discord DM schema for Google Voice SMS - exact format match
+      let alertMessage = `🚨 NEW SMS VIA GOOGLE VOICE (612-584-9396)\n` +
+        `📞 From: ${messageData.clientPhone || 'Unknown Number'}\n` +
+        `👤 Name: ${messageData.clientName || 'Not provided'}\n` +
+        `💬 Message: ${messageData.clientMessage}\n` +
+        `⏰ Time: ${messageData.date?.toLocaleString() || 'Unknown'}\n`;
 
-      await user.send(alertMessage);
-      console.log(`✅ Google Voice alert sent to ops lead`);
+      // Add LangChain analysis if available
+      if (analysis) {
+        const messageTypeDisplay = this.formatMessageTypeForDisplay(analysis.message_type);
+        const confidencePercent = Math.round((analysis.confidence || 0) * 100);
+        
+        alertMessage += `_________\n` +
+          `ANALYSIS\n` +
+          `_________\n` +
+          `👤 Type: ${messageTypeDisplay}\n` +
+          `⚡ Urgency: ${analysis.urgency_level || 'medium'}\n` +
+          `🎯 Confidence: ${confidencePercent}%\n`;
+        
+        if (analysis.reasoning) {
+          // Change 'The email is from...' to 'This text is from...'
+          let reasoning = analysis.reasoning.replace(/The email is from/gi, 'This text is from');
+          alertMessage += `💡 Reasoning: ${reasoning}\n`;
+        }
+        
+        // Add suggested reply if Ava is confident (>80%)
+        if (analysis.confidence > 0.8 && analysis.requires_response) {
+          const suggestedReply = this.generateSuggestedReply(messageData, analysis);
+          if (suggestedReply) {
+            alertMessage += `_______________\n` +
+              `SUGGESTED REPLY\n` +
+              `_______________\n` +
+              `💬 Recommended Response:\n` +
+              `"${suggestedReply}"\n\n` +
+              `________________\n` +
+              `ACTION REQUIRED\n` +
+              `________________\n` +
+              `React with ✅ to send this reply via Google Voice\n`;
+          }
+        } else {
+          // If no suggested reply, still show action required
+          alertMessage += `________________\n` +
+            `ACTION REQUIRED\n` +
+            `________________\n` +
+            `⚠️ Review and respond as needed\n`;
+        }
+      } else {
+        // If no analysis, just show action required
+        alertMessage += `________________\n` +
+          `ACTION REQUIRED\n` +
+          `________________\n` +
+          `⚠️ Review and respond as needed\n`;
+      }
+
+      // Send the message (do NOT prefill the green checkmark reaction)
+      const sentMessage = await user.send(alertMessage);
+      
+      // Store for Google Voice reply approval if applicable (no prefilled reaction)
+      if (analysis && analysis.confidence > 0.8 && analysis.requires_response) {
+        this.pendingGoogleVoiceReplies.set(sentMessage.id, {
+          messageData,
+          analysis,
+          suggestedReply: this.generateSuggestedReply(messageData, analysis),
+          timestamp: new Date()
+        });
+        console.log(`📝 Stored pending Google Voice reply for approval (ID: ${sentMessage.id})`);
+      }
+      
+      console.log(`✅ Enhanced Google Voice alert sent to ops lead`);
 
     } catch (error) {
       console.error('❌ Error sending Google Voice alert:', error.message);
@@ -314,7 +383,7 @@ class EmailCommunicationMonitor {
   async analyzeSMSWithLangChain(messageData) {
     try {
       if (!this.langchainAgent) {
-        return;
+        return null;
       }
 
       const analysis = await this.langchainAgent.analyzeMessage({
@@ -330,360 +399,93 @@ class EmailCommunicationMonitor {
         confidence: analysis.confidence
       });
 
-      // Send enhanced analysis to Discord if urgent
-      if (analysis.urgency_level === 'critical' || analysis.urgency_level === 'high') {
-        const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
-        const user = await this.discordClient.users.fetch(opsLeadId);
-        
-        const enhancedAlert = `🧠 **LangChain Analysis - HIGH PRIORITY**\n\n` +
-          `📊 **Type:** ${analysis.message_type}\n` +
-          `⚡ **Urgency:** ${analysis.urgency_level}\n` +
-          `🎯 **Confidence:** ${(analysis.confidence * 100).toFixed(0)}%\n` +
-          `💡 **Reasoning:** ${analysis.reasoning || 'Auto-classified by AI'}`;
-        
-        await user.send(enhancedAlert);
-        console.log(`🧠 Enhanced LangChain alert sent for urgent SMS`);
-      }
+      return analysis;
 
     } catch (error) {
       console.error('❌ Error analyzing SMS with LangChain:', error.message);
-    }
-  }
-
-  parseGoogleVoiceEmail(emailData) {
-    try {
-      const headers = emailData.payload.headers;
-      const subject = headers.find(h => h.name === 'Subject')?.value || '';
-      const from = headers.find(h => h.name === 'From')?.value || '';
-      const date = headers.find(h => h.name === 'Date')?.value || '';
-
-      // Extract email body
-      let content = this.extractEmailBody(emailData.payload);
-      
-      // Parse Google Voice format
-      const clientInfo = this.parseGoogleVoiceContent(subject, content);
-
-      return {
-        id: emailData.id,
-        threadId: emailData.threadId,
-        subject,
-        from,
-        date: new Date(date),
-        content,
-        clientPhone: clientInfo.phone,
-        clientMessage: clientInfo.message,
-        clientName: clientInfo.name
-      };
-
-    } catch (error) {
-      console.error('❌ Error parsing Google Voice email:', error.message);
       return null;
     }
   }
 
-  parseGoogleVoiceContent(subject, content) {
-    const result = { phone: null, message: null, name: null };
-
-    // Extract phone number from subject: "SMS from +16125849396"
-    const phoneMatch = subject.match(/SMS from (\+?\d{10,})/);
-    if (phoneMatch) {
-      result.phone = phoneMatch[1];
-    }
-
-    // Extract message content - Google Voice emails have specific format
-    const lines = content.split('\n');
-    let messageStartIndex = -1;
-    
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('SMS from') || lines[i].trim() === '') {
-        continue;
-      } else {
-        messageStartIndex = i;
-        break;
-      }
-    }
-    
-    if (messageStartIndex >= 0) {
-      result.message = lines.slice(messageStartIndex).join('\n').trim();
-    }
-
-    return result;
-  }
-
-  extractEmailBody(payload) {
-    let body = '';
-    
-    if (payload.body.data) {
-      body = Buffer.from(payload.body.data, 'base64').toString();
-    } else if (payload.parts) {
-      for (const part of payload.parts) {
-        if (part.mimeType === 'text/plain' && part.body.data) {
-          body += Buffer.from(part.body.data, 'base64').toString();
-        }
-      }
-    }
-    
-    return body;
-  }
-
-  // === HIGH LEVEL CONVERSATION MONITORING ===
-  async checkHighLevelConversations() {
+  async analyzeHighLevelMessageWithLangChain(messageData) {
     try {
-      // High Level conversations API not available in v1 - skipping
-      console.log('📱 High Level conversations monitoring disabled (API not available)');
-      
-      // Update last check time to prevent log spam
-      this.lastHighLevelCheck = new Date();
-    } catch (error) {
-      console.error('❌ Error checking High Level conversations:', error.message);
-    }
-  }
-
-  filterRecentMessages(messages, since) {
-    if (!messages || !Array.isArray(messages)) return [];
-    
-    return messages.filter(msg => {
-      const messageDate = new Date(msg.dateAdded);
-      return messageDate > since && msg.direction === 'inbound';
-    });
-  }
-
-  async processHighLevelMessage(conversation, message) {
-    try {
-      // Check for schedule requests
-      const scheduleRequest = detectScheduleRequest(message.body);
-      
-      if (scheduleRequest.isScheduleRequest) {
-        console.log(`🎯 Schedule request detected in High Level from ${conversation.contact?.name || 'Unknown'}`);
-        
-        await this.handleScheduleRequest({
-          source: 'high_level',
-          businessNumber: '651-515-1478',
-          conversationId: conversation.id,
-          contactId: conversation.contactId,
-          clientName: conversation.contact?.name || 'Unknown',
-          clientPhone: conversation.contact?.phone || '',
-          clientMessage: message.body,
-          timestamp: new Date(message.dateAdded)
-        }, scheduleRequest);
+      if (!this.langchainAgent) {
+        return null;
       }
 
-    } catch (error) {
-      console.error('❌ Error processing High Level message:', error.message);
-    }
-  }
-
-  // === UNIFIED SCHEDULE REQUEST HANDLING ===
-  async handleScheduleRequest(messageData, scheduleRequest) {
-    try {
-      // 1. Send Discord alert
-      await this.sendDiscordAlert(messageData, scheduleRequest);
-      
-      // 2. Generate reply draft
-      const replyDraft = await this.generateReplyDraft(messageData, scheduleRequest);
-      
-      // 3. Send draft for approval
-      await this.sendApprovalRequest(messageData, replyDraft, 'Schedule Change Request');
-      
-      // 4. Log to Notion
-      await this.logToNotion(messageData, scheduleRequest);
-      
-    } catch (error) {
-      console.error('❌ Error handling schedule request:', error.message);
-    }
-  }
-
-  async sendDiscordAlert(messageData, scheduleRequest) {
-    try {
-      const alertsChannel = this.discordClient.channels.cache.get(process.env.DISCORD_ALERTS_CHANNEL_ID);
-      const opsLeadId = process.env.OPS_LEAD_DISCORD_ID;
-      
-      if (!alertsChannel) return;
-
-      const urgencyEmoji = scheduleRequest.urgency === 'high' ? '🚨' : 
-                          scheduleRequest.urgency === 'medium' ? '⚠️' : 'ℹ️';
-      
-      const embed = {
-        color: scheduleRequest.urgency === 'high' ? 0xff0000 : 
-               scheduleRequest.urgency === 'medium' ? 0xffaa00 : 0x0099ff,
-        title: `${urgencyEmoji} Schedule Request Detected`,
-        fields: [
-          { name: '📞 Source', value: `${messageData.source.replace('_', ' ').toUpperCase()} (${messageData.businessNumber})`, inline: true },
-          { name: '👤 Client', value: `${messageData.clientName || 'Unknown'}\n${messageData.clientPhone || 'No phone'}`, inline: true },
-          { name: '📝 Request Type', value: scheduleRequest.type || 'General', inline: true },
-          { name: '💬 Message', value: messageData.clientMessage.substring(0, 500), inline: false },
-          { name: '🎯 Confidence', value: `${Math.round(scheduleRequest.confidence * 100)}%`, inline: true },
-          { name: '🔑 Keywords', value: scheduleRequest.keywords.join(', '), inline: true }
-        ],
-        timestamp: new Date().toISOString(),
-        footer: { text: 'Grime Guardians Schedule Monitor' }
-      };
-
-      await alertsChannel.send({
-        content: `<@${opsLeadId}> New schedule request needs attention`,
-        embeds: [embed]
+      const analysis = await this.langchainAgent.analyzeMessage({
+        subject: `High Level SMS from ${messageData.clientPhone}`,
+        from: messageData.clientPhone || 'unknown',
+        body: messageData.clientMessage,
+        timestamp: messageData.timestamp?.toISOString() || new Date().toISOString()
       });
 
-    } catch (error) {
-      console.error('❌ Error sending Discord alert:', error.message);
-    }
-  }
-
-  async generateReplyDraft(messageData, scheduleRequest) {
-    const clientName = messageData.clientName || 'there';
-    
-    let replyTemplate;
-    
-    switch (scheduleRequest.type) {
-      case 'reschedule':
-        replyTemplate = `Hi ${clientName}! I received your request to reschedule. I'll check our availability and get back to you shortly with some options. Thanks for letting me know in advance!`;
-        break;
-      case 'cancellation':
-        replyTemplate = `Hi ${clientName}! I got your cancellation request. I'll remove your appointment from our schedule. If you'd like to reschedule for another time, just let me know!`;
-        break;
-      case 'postpone':
-        replyTemplate = `Hi ${clientName}! I understand you need to postpone your cleaning. I'll hold off on scheduling and reach out soon to find a better time that works for you.`;
-        break;
-      default:
-        replyTemplate = `Hi ${clientName}! I received your message about your cleaning appointment. I'll review your request and get back to you shortly. Thanks for reaching out!`;
-    }
-    
-    return replyTemplate;
-  }
-
-  async sendApprovalRequest(messageData, replyDraft, messageType = 'Message') {
-    try {
-      const opsLead = await this.discordClient.users.fetch(process.env.OPS_LEAD_DISCORD_ID);
-      
-      // Choose appropriate color and emoji based on message type
-      const colors = {
-        'New Prospect Inquiry': 0x00ff00,
-        '⚠️ Customer Complaint - URGENT': 0xff0000,
-        'Schedule Change Request': 0xffaa00
-      };
-      
-      const color = colors[messageType] || 0x3498db;
-      
-      const embed = {
-        color,
-        title: `✅ Reply Draft Ready for Approval`,
-        description: `**${messageType}**`,
-        fields: [
-          { name: '📞 Channel', value: messageData.source.replace('_', ' ').toUpperCase(), inline: true },
-          { name: '👤 Client', value: messageData.clientName || 'Unknown', inline: true },
-          { name: '📱 Phone', value: messageData.clientPhone || 'N/A', inline: true },
-          { name: '💬 Original Message', value: messageData.clientMessage.substring(0, 200) + '...', inline: false },
-          { name: '📝 Suggested Reply', value: replyDraft, inline: false }
-        ],
-        footer: { text: 'React with ✅ to approve and send, or ❌ to cancel' }
-      };
-
-      const dmMessage = await opsLead.send({ embeds: [embed] });
-      
-      // Store for approval handling (user will add their own reactions)
-      this.pendingReplies.set(dmMessage.id, {
-        messageData,
-        replyDraft,
-        messageType,
-        timestamp: new Date()
+      console.log(`🧠 LangChain High Level Analysis:`, {
+        messageType: analysis.message_type,
+        urgency: analysis.urgency_level,
+        confidence: analysis.confidence
       });
 
+      return analysis;
+
     } catch (error) {
-      console.error('❌ Error sending approval request:', error.message);
+      console.error('❌ Error analyzing High Level message with LangChain:', error.message);
+      return null;
     }
   }
 
-  async logToNotion(messageData, scheduleRequest) {
-    try {
-      const pageData = {
-        clientName: messageData.clientName || 'Unknown',
-        clientPhone: messageData.clientPhone || '',
-        source: messageData.source,
-        businessNumber: messageData.businessNumber,
-        message: messageData.clientMessage,
-        requestType: scheduleRequest.type || 'General',
-        urgency: scheduleRequest.urgency || 'medium',
-        confidence: scheduleRequest.confidence || 0,
-        keywords: scheduleRequest.keywords || [],
-        timestamp: messageData.timestamp || new Date(),
-        status: 'Pending Response'
-      };
-
-      await createScheduleRequestPage(pageData);
-      console.log('✅ Schedule request logged to Notion');
-
-    } catch (error) {
-      console.error('❌ Error logging to Notion:', error.message);
-    }
-  }
-
-  // === REPLY APPROVAL HANDLING ===
-  async handleApprovalReaction(messageId, emoji, userId) {
-    console.log(`[ApprovalDebug] Reaction received - MessageID: ${messageId}, Emoji: ${emoji}, UserID: ${userId}`);
-    console.log(`[ApprovalDebug] Expected OPS_LEAD_ID: ${process.env.OPS_LEAD_DISCORD_ID}`);
-    console.log(`[ApprovalDebug] User ID matches: ${userId === process.env.OPS_LEAD_DISCORD_ID}`);
-    console.log(`[ApprovalDebug] Pending replies count: ${this.pendingReplies.size}`);
+  // === GOOGLE VOICE REPLY APPROVAL HANDLING ===
+  async handleGoogleVoiceApproval(messageId, emoji, userId) {
+    console.log(`[GoogleVoiceApproval] Reaction received - MessageID: ${messageId}, Emoji: ${emoji}, UserID: ${userId}`);
     
-    if (userId !== process.env.OPS_LEAD_DISCORD_ID) {
-      console.log(`[ApprovalDebug] User ID mismatch - ignoring reaction`);
-      return;
+    if (userId !== process.env.DISCORD_OPS_LEAD_ID) {
+      console.log(`[GoogleVoiceApproval] User ID mismatch - ignoring reaction`);
+      return false;
     }
     
-    const pendingReply = this.pendingReplies.get(messageId);
-    console.log(`[ApprovalDebug] Found pending reply: ${!!pendingReply}`);
-    
+    const pendingReply = this.pendingGoogleVoiceReplies.get(messageId);
     if (!pendingReply) {
-      console.log(`[ApprovalDebug] No pending reply found for message ID: ${messageId}`);
-      console.log(`[ApprovalDebug] Available message IDs: ${Array.from(this.pendingReplies.keys()).join(', ')}`);
-      return;
+      console.log(`[GoogleVoiceApproval] No pending Google Voice reply found for message ID: ${messageId}`);
+      return false;
     }
 
     if (emoji === '✅') {
-      console.log(`[ApprovalDebug] Approval confirmed - sending reply`);
-      await this.sendApprovedReply(pendingReply);
-      console.log('✅ Reply approved and sent');
-    } else if (emoji === '❌') {
-      console.log('❌ Reply cancelled by operator');
+      console.log(`[GoogleVoiceApproval] Approval confirmed - sending Google Voice reply`);
+      await this.sendGoogleVoiceReply(pendingReply);
+      console.log('✅ Google Voice reply approved and sent');
+      
+      // Clean up
+      this.pendingGoogleVoiceReplies.delete(messageId);
+      return true;
     }
 
-    // Clean up
-    this.pendingReplies.delete(messageId);
-    console.log(`[ApprovalDebug] Cleaned up pending reply - remaining: ${this.pendingReplies.size}`);
+    return false;
   }
 
-  async sendApprovedReply(pendingReply) {
-    const { messageData, replyDraft } = pendingReply;
+  async sendGoogleVoiceReply(pendingReply) {
+    const { messageData, suggestedReply } = pendingReply;
     
-    console.log(`[SendReply] Attempting to send reply via ${messageData.source}`);
-    console.log(`[SendReply] Reply text: ${replyDraft.substring(0, 100)}...`);
+    console.log(`[GoogleVoiceReply] Sending reply to ${messageData.clientPhone}: ${suggestedReply.substring(0, 50)}...`);
     
     try {
-      if (messageData.source === 'google_voice') {
-        console.log(`[SendReply] Sending via Gmail for Google Voice`);
-        // Send via Gmail (will forward as SMS through Google Voice)
-        await this.sendGmailReply(messageData, replyDraft);
-      } else if (messageData.source === 'high_level') {
-        console.log(`[SendReply] Sending via High Level API`);
-        // Send via High Level API
-        await this.sendHighLevelReply(messageData, replyDraft);
+      // Use broberts111592@gmail.com for Google Voice replies
+      const googleVoiceAccount = 'broberts111592@gmail.com';
+      
+      if (!this.gmailClients.has(googleVoiceAccount)) {
+        throw new Error(`Gmail account ${googleVoiceAccount} not available for Google Voice replies`);
       }
-      console.log(`[SendReply] Reply sent successfully`);
-    } catch (error) {
-      console.error('❌ Error sending approved reply:', error.message);
-      console.error('❌ Full error:', error);
-    }
-  }
 
-  async sendGmailReply(messageData, replyText) {
-    try {
-      // Compose email reply that will trigger SMS through Google Voice
+      const gmail = this.gmailClients.get(googleVoiceAccount);
+      
+      // FIXED: Reply to the original Google Voice email instead of creating new email
+      // This maintains proper threading and recipient information
       const emailContent = [
         `To: ${messageData.from}`,
         `Subject: Re: ${messageData.subject}`,
         `In-Reply-To: ${messageData.id}`,
         `References: ${messageData.id}`,
         ``,
-        replyText
+        suggestedReply
       ].join('\n');
 
       const encodedMessage = Buffer.from(emailContent)
@@ -692,33 +494,220 @@ class EmailCommunicationMonitor {
         .replace(/\//g, '_')
         .replace(/=+$/, '');
 
-      await this.gmail.users.messages.send({
+      await gmail.users.messages.send({
         userId: 'me',
         requestBody: {
-          threadId: messageData.threadId,
+          threadId: messageData.threadId,  // Maintain thread continuity
           raw: encodedMessage
         }
       });
 
-      console.log(`✅ Gmail reply sent (will forward as SMS to ${messageData.clientPhone})`);
+      console.log(`✅ Google Voice reply sent to ${messageData.clientPhone} via thread reply`);
+      
+      // Send confirmation to ops lead
+      await this.sendReplyConfirmation(messageData, suggestedReply);
 
     } catch (error) {
-      console.error('❌ Error sending Gmail reply:', error.message);
+      console.error('❌ Error sending Google Voice reply:', error.message);
+      
+      // Send error notification to ops lead
+      await this.sendReplyError(messageData, error.message);
       throw error;
     }
   }
 
   async sendHighLevelReply(messageData, replyText) {
     try {
-      // Use High Level API to send reply
+      // Use High Level v2 API to send reply
       const { sendMessage } = require('./highlevel');
       
+      console.log(`[HighLevelReply] Sending reply to contact ${messageData.contactId}: ${replyText.substring(0, 50)}...`);
+      
       await sendMessage(messageData.contactId, replyText);
-      console.log(`✅ High Level reply sent to ${messageData.clientName}`);
+      console.log(`✅ High Level reply sent to ${messageData.clientName} (${messageData.clientPhone})`);
+      
+      // Send confirmation to ops lead
+      await this.sendHighLevelReplyConfirmation(messageData, replyText);
 
     } catch (error) {
       console.error('❌ Error sending High Level reply:', error.message);
+      
+      // Send error notification to ops lead
+      await this.sendHighLevelReplyError(messageData, error.message);
       throw error;
+    }
+  }
+
+  async sendHighLevelReplyConfirmation(messageData, replyText) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) return;
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      
+      const confirmationMessage = `✅ **High Level Reply Sent Successfully**\n\n` +
+        `📞 **To:** ${messageData.clientPhone}\n` +
+        `👤 **Name:** ${messageData.clientName || 'Unknown'}\n` +
+        `💬 **Reply:** "${replyText}"\n` +
+        `⏰ **Sent:** ${new Date().toLocaleString()}`;
+
+      await user.send(confirmationMessage);
+      console.log('✅ High Level reply confirmation sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending High Level reply confirmation:', error.message);
+    }
+  }
+
+  async sendHighLevelReplyError(messageData, errorMessage) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) return;
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      
+      const errorAlert = `❌ **High Level Reply Failed**\n\n` +
+        `📞 **To:** ${messageData.clientPhone}\n` +
+        `👤 **Name:** ${messageData.clientName || 'Unknown'}\n` +
+        `⚠️ **Error:** ${errorMessage}\n` +
+        `💡 **Action:** Please send reply manually via High Level`;
+
+      await user.send(errorAlert);
+      console.log('❌ High Level reply error notification sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending High Level reply error notification:', error.message);
+    }
+  }
+
+  async sendHighLevelAlert(messageData, analysis = null) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) {
+        console.log('⚠️ No ops lead Discord ID configured');
+        return;
+      }
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      if (!user) {
+        console.log('❌ Could not find ops lead user');
+        return;
+      }
+
+      // Discord DM schema for High Level SMS - matching Google Voice format
+      let alertMessage = `🚨 NEW SMS VIA HIGH LEVEL (651-515-1478)\n` +
+        `📞 From: ${messageData.clientPhone || 'Unknown Number'}\n` +
+        `👤 Name: ${messageData.clientName || 'Not provided'}\n` +
+        `💬 Message: ${messageData.clientMessage}\n` +
+        `⏰ Time: ${messageData.timestamp?.toLocaleString() || 'Unknown'}\n`;
+
+      // Add LangChain analysis if available
+      if (analysis) {
+        const messageTypeDisplay = this.formatMessageTypeForDisplay(analysis.message_type);
+        const confidencePercent = Math.round((analysis.confidence || 0) * 100);
+        
+        alertMessage += `_________\n` +
+          `ANALYSIS\n` +
+          `_________\n` +
+          `👤 Type: ${messageTypeDisplay}\n` +
+          `⚡ Urgency: ${analysis.urgency_level || 'medium'}\n` +
+          `🎯 Confidence: ${confidencePercent}%\n`;
+        
+        if (analysis.reasoning) {
+          // Change 'The email is from...' to 'This text is from...'
+          let reasoning = analysis.reasoning.replace(/The email is from/gi, 'This text is from');
+          alertMessage += `💡 Reasoning: ${reasoning}\n`;
+        }
+        
+        // Add suggested reply if Ava is confident (>80%)
+        if (analysis.confidence > 0.8 && analysis.requires_response) {
+          const suggestedReply = this.generateSuggestedReply(messageData, analysis);
+          if (suggestedReply) {
+            alertMessage += `_______________\n` +
+              `SUGGESTED REPLY\n` +
+              `_______________\n` +
+              `💬 Recommended Response:\n` +
+              `"${suggestedReply}"\n\n` +
+              `________________\n` +
+              `ACTION REQUIRED\n` +
+              `________________\n` +
+              `React with ✅ to send this reply via High Level\n`;
+          }
+        } else {
+          // If no suggested reply, still show action required
+          alertMessage += `________________\n` +
+            `ACTION REQUIRED\n` +
+            `________________\n` +
+            `⚠️ Review and respond as needed\n`;
+        }
+      } else {
+        // If no analysis, just show action required
+        alertMessage += `________________\n` +
+          `ACTION REQUIRED\n` +
+          `________________\n` +
+          `⚠️ Review and respond as needed\n`;
+      }
+
+      // Send the message (do NOT prefill the green checkmark reaction)
+      const sentMessage = await user.send(alertMessage);
+      
+      // Store for High Level reply approval if applicable (no prefilled reaction)
+      if (analysis && analysis.confidence > 0.8 && analysis.requires_response) {
+        this.pendingReplies.set(sentMessage.id, {
+          messageData,
+          replyDraft: this.generateSuggestedReply(messageData, analysis),
+          messageType: 'High Level SMS',
+          timestamp: new Date()
+        });
+        console.log(`📝 Stored pending High Level reply for approval (ID: ${sentMessage.id})`);
+      }
+      
+      console.log(`✅ Enhanced High Level alert sent to ops lead`);
+
+    } catch (error) {
+      console.error('❌ Error sending High Level alert:', error.message);
+    }
+  }
+
+  async sendReplyConfirmation(messageData, replyText) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) return;
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      
+      const confirmationMessage = `✅ **Google Voice Reply Sent Successfully**\n\n` +
+        `📞 **To:** ${messageData.clientPhone}\n` +
+        `👤 **Name:** ${messageData.clientName || 'Unknown'}\n` +
+        `💬 **Reply:** "${replyText}"\n` +
+        `⏰ **Sent:** ${new Date().toLocaleString()}`;
+
+      await user.send(confirmationMessage);
+      console.log('✅ Reply confirmation sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending reply confirmation:', error.message);
+    }
+  }
+
+  async sendReplyError(messageData, errorMessage) {
+    try {
+      const opsLeadId = process.env.DISCORD_OPS_LEAD_ID;
+      if (!opsLeadId) return;
+
+      const user = await this.discordClient.users.fetch(opsLeadId);
+      
+      const errorAlert = `❌ **Google Voice Reply Failed**\n\n` +
+        `📞 **To:** ${messageData.clientPhone}\n` +
+        `👤 **Name:** ${messageData.clientName || 'Unknown'}\n` +
+        `⚠️ **Error:** ${errorMessage}\n` +
+        `💡 **Action:** Please send reply manually`;
+
+      await user.send(errorAlert);
+      console.log('❌ Reply error notification sent to ops lead');
+      
+    } catch (error) {
+      console.error('❌ Error sending reply error notification:', error.message);
     }
   }
 
@@ -1072,6 +1061,224 @@ Keep under 160 characters for SMS:`;
     }
     
     return false;
+  }
+
+  // Helper methods for enhanced Discord DM formatting
+  formatMessageTypeForDisplay(messageType) {
+    const typeMap = {
+      'customer_service': 'Customer service',
+      'sales_inquiry': 'Sales inquiry',
+      'complaint': 'Complaint',
+      'operational': 'Operational',
+      'payment': 'Payment',
+      'spam': 'Spam',
+      'new_inquiry': 'New inquiry',
+      'booking_request': 'Booking request',
+      'schedule_change': 'Schedule change',
+      'compliment': 'Compliment',
+      'payment_question': 'Payment question',
+      'service_question': 'Service question',
+      'other': 'Other'
+    };
+    return typeMap[messageType] || messageType;
+  }
+
+  getUrgencyEmoji(urgencyLevel) {
+    const emojiMap = {
+      'critical': '🚨',
+      'high': '⚠️',
+      'medium': '📋',
+      'low': '💭'
+    };
+    return emojiMap[urgencyLevel] || '📋';
+  }
+
+  generateSuggestedReply(messageData, analysis) {
+    const messageText = messageData.clientMessage.toLowerCase();
+    const messageType = analysis.message_type;
+    const clientName = messageData.clientName && messageData.clientName !== 'Me' ? messageData.clientName : '';
+    const greeting = clientName ? `Hi ${clientName}! ` : 'Hi! ';
+    
+    // Enhanced contextual replies with specific keyword detection
+    if (messageType === 'sales_inquiry' || messageType === 'new_inquiry') {
+      if (messageText.includes('quote') || messageText.includes('price') || messageText.includes('cost') || messageText.includes('how much')) {
+        if (messageText.includes('bedroom') || messageText.includes('bathroom') || messageText.includes('house') || messageText.includes('apartment')) {
+          return `${greeting}Thank you for your interest! Based on what you've shared, I can provide a personalized quote. Could you confirm the number of bedrooms/bathrooms and your preferred frequency? We start at $80 for smaller homes with competitive rates for all sizes.`;
+        }
+        return `${greeting}I'd be happy to provide a quote! Could you please share the size of your home (bedrooms/bathrooms) and your preferred cleaning frequency? Our rates are very competitive and we offer exceptional service.`;
+      }
+      if (messageText.includes('available') || messageText.includes('schedule') || messageText.includes('appointment')) {
+        return `${greeting}Great question! We have availability this week and can usually accommodate same-week bookings. What days work best for you? We're flexible with timing.`;
+      }
+      return `${greeting}Thank you for contacting Grime Guardians! We'd love to help with your cleaning needs. What type of cleaning service are you looking for?`;
+    }
+    
+    if (messageType === 'booking_request') {
+      if (messageText.includes('tomorrow') || messageText.includes('today') || messageText.includes('asap') || messageText.includes('urgent')) {
+        return `${greeting}We can definitely help with short notice! Let me check our availability for tomorrow and get back to you within 30 minutes. What time would work best?`;
+      }
+      return `${greeting}Thank you for choosing Grime Guardians! I'll get you scheduled right away. What dates and times work best for you? We have good availability this week.`;
+    }
+    
+    if (messageType === 'schedule_change') {
+      if (messageText.includes('cancel')) {
+        return `${greeting}No problem at all! I've noted your cancellation request. Would you like to reschedule for a different date, or shall I process this as a full cancellation?`;
+      }
+      if (messageText.includes('reschedule') || messageText.includes('move') || messageText.includes('change')) {
+        return `${greeting}Absolutely! We understand schedules change. What new date and time would work better for you? I'll update your appointment right away.`;
+      }
+      return `${greeting}I'd be happy to help adjust your appointment. What changes do you need to make?`;
+    }
+    
+    if (messageType === 'complaint') {
+      if (messageText.includes('disappointed') || messageText.includes('unsatisfied') || messageText.includes('poor') || messageText.includes('bad')) {
+        return `${greeting}I sincerely apologize - this is absolutely not the standard we maintain at Grime Guardians. I want to make this right immediately. Can we schedule a time today for me to call you to discuss how we can resolve this?`;
+      }
+      return `${greeting}I sincerely apologize for any issues with our service. This is not acceptable and I want to resolve it quickly. Could you please share more details so we can address this immediately?`;
+    }
+    
+    if (messageType === 'payment' || messageType === 'payment_question') {
+      if (messageText.includes('charge') || messageText.includes('bill') || messageText.includes('invoice')) {
+        return `${greeting}I'll review your billing details right away and send you a detailed breakdown within the hour. If there are any discrepancies, we'll resolve them immediately.`;
+      }
+      return `${greeting}Thank you for reaching out about your payment. I'll review your account and get back to you within the hour with all the details you need.`;
+    }
+    
+    if (messageType === 'customer_service' || messageType === 'service_question') {
+      // Time-related inquiries
+      if ((messageText.includes('time') || messageText.includes('when')) && 
+          (messageText.includes('tomorrow') || messageText.includes('today') || messageText.includes('scheduled') || messageText.includes('coming'))) {
+        return `${greeting}Let me check your appointment details right away! I'll text you back within 15 minutes with your exact scheduled time and our team member's name.`;
+      }
+      
+      // Adding services
+      if (messageText.includes('add') && (messageText.includes('dish') || messageText.includes('kitchen') || messageText.includes('extra'))) {
+        return `${greeting}Absolutely! We can add dishes and any other kitchen tasks to your service. I'll note this in your appointment details and inform the team. Anything else you'd like us to include?`;
+      }
+      
+      // Rescheduling within customer service
+      if (messageText.includes('reschedule') || messageText.includes('change') || 
+          messageText.includes('move') || messageText.includes('different day') ||
+          messageText.includes('different time')) {
+        return `${greeting}No problem! Life happens and we're flexible. What new date would work better for you? I can update your appointment right now.`;
+      }
+      
+      // General questions
+      if (messageText.includes('question') || messageText.includes('help') || messageText.includes('info') || messageText.includes('wondering')) {
+        return `${greeting}I'm here to help! What specific questions do you have about your cleaning service? I'll get you the answers you need right away.`;
+      }
+      
+      // Key access or entry issues
+      if (messageText.includes('key') || messageText.includes('lock') || messageText.includes('door') || messageText.includes('entry')) {
+        return `${greeting}Thanks for reaching out about access! I'll coordinate with our team to ensure smooth entry. Let me know the best way to handle this for your appointment.`;
+      }
+      
+      return `${greeting}Thank you for reaching out! I'm here to help with your cleaning service. Let me assist you with that right away.`;
+    }
+    
+    if (messageType === 'operational') {
+      // Handle employee/team communications differently
+      if (messageData.clientName && (messageData.clientName.includes('🧹') || messageData.clientName.includes('Team'))) {
+        if (messageText.includes('running late') || messageText.includes('delay')) {
+          return `Got it! Thanks for the heads up. I'll notify the client about the slight delay and adjust the schedule. Keep me posted on your ETA.`;
+        }
+        return `Understood! Thanks for the update. I'll coordinate accordingly and handle any client communication needed. Let me know if anything else comes up.`;
+      }
+      return `${greeting}Thank you for the update. I'll process this information and coordinate as needed. Is there anything else I should know?`;
+    }
+    
+    if (messageType === 'compliment') {
+      if (messageText.includes('amazing') || messageText.includes('excellent') || messageText.includes('perfect') || messageText.includes('outstanding')) {
+        return `${greeting}Wow, thank you so much! This absolutely made our day. Our team takes such pride in their work and will be thrilled to hear this. We truly appreciate you taking the time to share this feedback!`;
+      }
+      return `${greeting}Thank you so much for the kind words! Our team will be thrilled to hear this feedback. We truly appreciate you taking the time to share your experience with Grime Guardians.`;
+    }
+    
+    // Enhanced default response based on urgency
+    if (analysis && analysis.urgency_level === 'high') {
+      return `${greeting}Thank you for reaching out! I can see this is time-sensitive. I'll prioritize your message and respond within the hour. If it's extremely urgent, please call us at (612) 584-9396.`;
+    }
+    
+    // Default response for other types
+    return `${greeting}Thank you for contacting Grime Guardians! We've received your message and will respond within a few hours. If this is urgent, please call us at (612) 584-9396.`;
+  }
+  
+  // === HIGH LEVEL CONVERSATION MONITORING ===
+  async checkHighLevelConversations() {
+    try {
+      console.log('📱 Checking High Level conversations...');
+      
+      // Get conversations from High Level API
+      const { getAllConversations } = require('./highlevel');
+      const conversations = await getAllConversations();
+      
+      if (!conversations || conversations.length === 0) {
+        console.log('📱 No High Level conversations found');
+        this.lastHighLevelCheck = new Date();
+        return;
+      }
+      
+      console.log(`📱 Found ${conversations.length} High Level conversations`);
+      
+      // Filter for new messages since last check
+      const recentConversations = conversations.filter(conv => {
+        const lastMessage = conv.lastMessage;
+        if (!lastMessage || !lastMessage.dateAdded) return false;
+        
+        const messageDate = new Date(lastMessage.dateAdded);
+        return messageDate > this.lastHighLevelCheck && 
+               lastMessage.direction === 'inbound' &&
+               !this.processedHighLevelIds.has(lastMessage.id);
+      });
+      
+      console.log(`📱 Found ${recentConversations.length} new High Level messages`);
+      
+      // Process each new conversation
+      for (const conversation of recentConversations) {
+        const lastMessage = conversation.lastMessage;
+        
+        if (lastMessage && !this.processedHighLevelIds.has(lastMessage.id)) {
+          console.log(`📱 Processing High Level message from: ${conversation.contact?.name || conversation.contact?.phone || 'Unknown'}`);
+          
+          // Create message data for processing
+          const messageData = {
+            source: 'high_level',
+            businessNumber: '651-515-1478',
+            conversationId: conversation.id,
+            contactId: conversation.contactId,
+            clientName: conversation.contact?.name || 'Unknown',
+            clientPhone: conversation.contact?.phone || '',
+            clientMessage: lastMessage.body || '',
+            timestamp: new Date(lastMessage.dateAdded),
+            from: `${conversation.contact?.name || 'Unknown'} <${conversation.contact?.phone || 'no-phone'}>`,
+            subject: `High Level SMS from ${conversation.contact?.phone || 'Unknown'}`,
+            id: lastMessage.id,
+            threadId: conversation.id
+          };
+          
+          // Analyze with LangChain if available
+          let analysis = null;
+          if (this.langchainAgent) {
+            analysis = await this.analyzeHighLevelMessageWithLangChain(messageData);
+          }
+          
+          // Send enhanced Discord DM to ops lead
+          await this.sendHighLevelAlert(messageData, analysis);
+          
+          // Mark as processed
+          this.processedHighLevelIds.add(lastMessage.id);
+        }
+      }
+      
+      // Update last check time
+      this.lastHighLevelCheck = new Date();
+      console.log(`📱 Processed ${recentConversations.length} new High Level messages`);
+      
+    } catch (error) {
+      console.error('❌ Error checking High Level conversations:', error.message);
+      // Update last check time even on error to prevent spam
+      this.lastHighLevelCheck = new Date();
+    }
   }
 }
 

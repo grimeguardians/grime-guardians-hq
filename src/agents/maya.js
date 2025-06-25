@@ -13,6 +13,8 @@ class Maya extends Agent {
     this.client = client;
     this.praiseHistory = new Map(); // Track what we've already praised
     this.streakTracking = new Map(); // Track performance streaks
+    this.lastMilestoneCheck = null; // Rate limiting for milestone checks
+    this.milestoneCheckCooldown = 60 * 60 * 1000; // 1 hour cooldown
   }
 
   onReady() {
@@ -90,20 +92,48 @@ class Maya extends Agent {
   }
 
   async checkForMilestones() {
+    // Rate limiting: Don't check more than once per hour
+    const now = Date.now();
+    if (this.lastMilestoneCheck && (now - this.lastMilestoneCheck) < this.milestoneCheckCooldown) {
+      console.log('[Maya] Milestone check on cooldown, skipping');
+      return;
+    }
+
+    console.log('[Maya] Checking for milestones...');
+    this.lastMilestoneCheck = now;
+
     // Check all active cleaners for milestone achievements
     const cleaners = await this.getActiveCleaners();
     
+    console.log('[Maya] Checking milestones for cleaners:', cleaners);
     for (const cleaner of cleaners) {
       await this.checkIndividualMilestones(cleaner);
     }
   }
 
   async checkIndividualMilestones(username) {
+    // Validate username - skip invalid names
+    if (!username || typeof username !== 'string' || username.length < 2) {
+      console.log(`[Maya] Skipping invalid username: ${username}`);
+      return;
+    }
+
+    // Skip system/database field names
+    const invalidNames = ['name', 'nodes', 'pinData', 'connections', 'active', 'settings', 'versionId', 'meta', 'id', 'tags'];
+    if (invalidNames.includes(username)) {
+      console.log(`[Maya] Skipping system field name: ${username}`);
+      return;
+    }
+
+    console.log(`[Maya] Checking milestones for: ${username}`);
     const stats = await this.getPerformanceMetrics(username);
     const milestoneKey = `${username}-${new Date().toDateString()}`;
 
     // Skip if already praised today
-    if (this.praiseHistory.has(milestoneKey)) return;
+    if (this.praiseHistory.has(milestoneKey)) {
+      console.log(`[Maya] Already praised ${username} today, skipping`);
+      return;
+    }
 
     const milestones = [];
 
@@ -224,17 +254,16 @@ class Maya extends Agent {
   }
 
   async getActiveCleaners() {
-    // Get list of cleaners from Keith's memory
-    try {
-      const memoryPath = './COO_Memory_Stack (8).json';
-      if (require('fs').existsSync(memoryPath)) {
-        const memory = JSON.parse(require('fs').readFileSync(memoryPath, 'utf8'));
-        return Object.keys(memory);
-      }
-    } catch (error) {
-      console.error('[Maya] Error getting active cleaners:', error);
-    }
-    return [];
+    // FIXED: Return actual cleaner names, not JSON keys
+    // This should pull from a proper cleaner database or hardcoded list
+    const activeCleaners = [
+      'grimeguardians',
+      'TestCleaner'
+      // Add more actual cleaner usernames here
+    ];
+    
+    console.log('[Maya] Retrieved active cleaners:', activeCleaners);
+    return activeCleaners;
   }
 
   scheduleDailyMotivation() {

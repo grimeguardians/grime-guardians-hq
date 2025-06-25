@@ -25,6 +25,14 @@ if (HIGHLEVEL_DISABLED) {
     extractJobForDiscord: () => {
       console.log('[HighLevel] Disabled - skipping job extraction');
       return null;
+    },
+    getAllConversations: async () => {
+      console.log('[HighLevel] Disabled - returning empty conversations');
+      return [];
+    },
+    sendMessage: async () => {
+      console.log('[HighLevel] Disabled - skipping message send');
+      return null;
     }
   };
 }
@@ -49,418 +57,261 @@ async function fetchAllAppointments() {
     startDate: today.toString(),
     endDate: futureDate.toString()
   });
-  
+
   const url = `${BASE_URL}?${params}`;
   
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
-      Accept: 'application/json',
-    },
-  });
-  
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-  const data = await res.json();
-  
-  return data.appointments || [];
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${HIGHLEVEL_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    console.log(`📅 Fetched ${data.appointments?.length || 0} appointments from High Level`);
+    
+    return data.appointments || [];
+  } catch (error) {
+    console.error('❌ Error fetching High Level appointments:', error.message);
+    return [];
+  }
 }
 
 /**
- * Transform a raw High Level appointment to a normalized job object
- * @param {Object} appt
- * @returns {Object}
- */
-function normalizeAppointment(appt) {
-  return {
-    id: appt.id,
-    title: appt.title || appt.serviceName || '',
-    description: appt.description || '',
-    date: appt.date || appt.startTime || '',
-    startTime: appt.startTime || '',
-    address: appt.location || appt.address || '',
-    notes: appt.notes || '',
-    assignedCleaner: appt.assignedTo || appt.userName || '',
-    contact: {
-      firstName: appt.contactFirstName || '',
-      lastName: appt.contactLastName || '',
-      phone: appt.contactPhone || '',
-      email: appt.contactEmail || '',
-    },
-    status: appt.status || '',
-    raw: appt
-  };
-}
-
-/**
- * Fetch and normalize all jobs/appointments
- * @returns {Promise<Array} Array of normalized job objects
+ * Process appointments into job format
+ * @returns {Promise<Array>} Array of job objects
  */
 async function getAllJobs() {
-  const appts = await fetchAllAppointments();
-  return appts.map(normalizeAppointment);
-}
-
-/**
- * Fetch and normalize jobs for a specific cleaner (by name or ID)
- * @param {string} cleaner
- * @returns {Promise<Array>} Array of normalized job objects
- */
-async function getJobsForCleaner(cleaner) {
-  const jobs = await getAllJobs();
-  return jobs.filter(job =>
-    job.assignedCleaner && job.assignedCleaner.toLowerCase().includes(cleaner.toLowerCase())
-  );
-}
-
-/**
- * Extract and format relevant job info for Discord job board posting
- * Detects pet info in notes and assigns pet type/count if found.
- * @param {Object} payload - Raw webhook payload from High Level
- * @returns {Object} Formatted job info for Discord
- */
-function extractJobForDiscord(payload) {
-  const cal = payload.calendar || {};
-  // Only post if assigned to dummy 'Available _' staff (keep this logic if needed)
-  const assigned = (payload.assignedTo || (payload.user && payload.user.firstName) || '').toLowerCase();
-  const isAvailable = assigned.startsWith('available');
-  if (!isAvailable) return null;
-
-  // --- Job Title ---
-  const jobTitle = cal.title || payload.serviceName || 'Cleaning Job';
-
-  // --- Date/Time: Always use calendar.startTime ---
-  let dateTime = 'Date not available';
-  if (cal.startTime) {
-    const date = new Date(cal.startTime);
-    if (!isNaN(date.getTime())) {
-      dateTime = date.toLocaleString('en-US', {
-        timeZone: 'America/Chicago',
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      });
-    } else {
-      dateTime = 'Invalid date format';
-    }
+  try {
+    const appointments = await fetchAllAppointments();
+    
+    return appointments.map(appointment => ({
+      id: appointment.id,
+      title: appointment.title || 'Cleaning Service',
+      startTime: new Date(parseInt(appointment.startTime)),
+      endTime: new Date(parseInt(appointment.endTime)),
+      address: appointment.address || 'No address provided',
+      contactId: appointment.contactId,
+      contact: appointment.contact || {},
+      calendarId: appointment.calendarId,
+      appointmentStatus: appointment.appointmentStatus || 'confirmed'
+    }));
+  } catch (error) {
+    console.error('❌ Error processing jobs:', error.message);
+    return [];
   }
+}
 
-  // --- Address ---
-  let address = (payload.address1 || '').trim();
-  if (address) {
-    // Remove trailing city/state/zip if present
-    address = address.replace(/,?\s*[A-Z\s]+\s+[A-Z]{2,}(\s*\d{5})?$/, '').trim();
+/**
+ * Get jobs for a specific cleaner based on their assigned calendar
+ * @param {string} cleanerId - The cleaner's identifier
+ * @returns {Promise<Array>} Array of job objects for the cleaner
+ */
+async function getJobsForCleaner(cleanerId) {
+  try {
+    const allJobs = await getAllJobs();
+    
+    // For now, return all jobs since we don't have cleaner-specific assignment logic
+    // This can be enhanced later based on your specific business logic
+    return allJobs.filter(job => {
+      // Add your cleaner assignment logic here
+      // For example, you might check a custom field or calendar assignment
+      return true; // Return all jobs for now
+    });
+  } catch (error) {
+    console.error(`❌ Error getting jobs for cleaner ${cleanerId}:`, error.message);
+    return [];
   }
-  const city = payload.city || '';
+}
 
-  // --- Notes extraction (no end time logic) ---
-  // Prefer calendar.notes, fallback to Additional info, then other note fields
-  let notes = (cal.notes || payload['Additional info'] || payload['Notes'] || '').trim();
-
-  // --- Extraction logic for bedrooms, bathrooms, type, pets, pay ---
-  let bedrooms = '';
-  let bathrooms = '';
-  let type = '';
-  let pets = '';
-  let pay = '';
-  let finalNotes = [];
+/**
+ * Extract job information for Discord display
+ * @param {Object} job - Job object from High Level
+ * @returns {Object} Formatted job data for Discord
+ */
+function extractJobForDiscord(job) {
+  if (!job) return null;
   
-  // Acceptable cleaning types (expand as needed)
-  const typeKeywords = [
-    'move-out', 'move in', 'move-in', 'move out', 'deep clean', 'deep cleaning', 'turnover', 'post-construction', 'recurring', 'commercial', 'standard', 'one-time', 'post construction', 'postconstruction', 'initial', 'regular', 'maintenance', 'airbnb', 'short-term', 'long-term', 'office', 'apartment', 'condo', 'house', 'studio', 'postrenovation', 'post-renovation', 'renovation', 'post remodel', 'remodel', 'spring clean', 'fall clean', 'holiday', 'event', 'after party', 'before party', 'pre-move', 'post-move', 'pre move', 'post move'
-  ];
-  
-  let petMatches = [];
-  
-  // Extract from notes (line by line) - process all extractions in one pass
-  notes.split('\n').forEach(line => {
-    const l = line.trim();
-    if (!l) return;
-    
-    let extracted = false;
-    
-    // Bedroom
-    let m = l.match(/^(\d+)\s*(b|bed|beds|bedroom|bedrooms)$/i);
-    if (m && !bedrooms) { 
-      bedrooms = m[1]; 
-      extracted = true;
-    }
-    
-    // Bathroom
-    if (!extracted) {
-      m = l.match(/^(\d+)\s*(ba|bath|baths|bathroom|bathrooms)$/i);
-      if (m && !bathrooms) { 
-        bathrooms = m[1]; 
-        extracted = true;
-      }
-    }
-    
-    // Pets - handle multiple pets on same line
-    if (!extracted) {
-      // First, check if the entire line is just pets (like "2 cats 2 dogs")
-      const petOnlyPattern = /^((\d+\s+)?(dog|cat|puppy|kitten|pet|rabbit|bird|fish|reptile|hamster|guinea pig|snake|lizard|turtle|parrot|ferret|mouse|rat|animal|dogs|cats|puppies|kittens|pets|rabbits|birds|fishes|reptiles|hamsters|guinea pigs|snakes|lizards|turtles|parrots|ferrets|mice|rats|animals)(\s+\d+)?(\s+(\d+\s+)?(dog|cat|puppy|kitten|pet|rabbit|bird|fish|reptile|hamster|guinea pig|snake|lizard|turtle|parrot|ferret|mouse|rat|animal|dogs|cats|puppies|kittens|pets|rabbits|birds|fishes|reptiles|hamsters|guinea pigs|snakes|lizards|turtles|parrots|ferrets|mice|rats|animals)(\s+\d+)?)*)$/i;
-      
-      if (petOnlyPattern.test(l)) {
-        // Extract all individual pets from this line
-        const individualPetPattern = /(\d+\s+)?(dog|cat|puppy|kitten|pet|rabbit|bird|fish|reptile|hamster|guinea pig|snake|lizard|turtle|parrot|ferret|mouse|rat|animal|dogs|cats|puppies|kittens|pets|rabbits|birds|fishes|reptiles|hamsters|guinea pigs|snakes|lizards|turtles|parrots|ferrets|mice|rats|animals)(\s+\d+)?/gi;
-        let match;
-        while ((match = individualPetPattern.exec(l)) !== null) {
-          let count = (match[1] && match[1].trim()) || (match[3] && match[3].trim()) || '1';
-          let petType = match[2].toLowerCase();
-          if (petType.endsWith('s')) petType = petType.slice(0, -1);
-          if (petType === 'mice') petType = 'mouse';
-          petMatches.push(`${count} ${petType}${count !== '1' ? 's' : ''}`);
-        }
-        extracted = true;
-      } else {
-        // Check if it's a single pet on its own line
-        const singlePetMatch = l.match(/^((\d+)\s*)?(dog|cat|puppy|kitten|pet|rabbit|bird|fish|reptile|hamster|guinea pig|snake|lizard|turtle|parrot|ferret|mouse|rat|animal|dogs|cats|puppies|kittens|pets|rabbits|birds|fishes|reptiles|hamsters|guinea pigs|snakes|lizards|turtles|parrots|ferrets|mice|rats|animals)(\s*\d+)?$/i);
-        if (singlePetMatch) {
-          let count = singlePetMatch[2] || singlePetMatch[4] || '1';
-          let petType = singlePetMatch[3].toLowerCase();
-          if (petType.endsWith('s')) petType = petType.slice(0, -1);
-          if (petType === 'mice') petType = 'mouse';
-          petMatches.push(`${count} ${petType}${count !== '1' ? 's' : ''}`);
-          extracted = true;
-        }
-      }
-    }
-    
-    // Pay - extract pay ranges and amounts
-    if (!extracted) {
-      // Match various pay patterns
-      const payPatterns = [
-        // $225 - $250, $180-$230, $150 to $200
-        /^.*?\$(\d+)\s*[-–—to]+\s*\$?(\d+).*$/i,
-        // This job pays between $180 - $230, pays $200-250, etc.
-        /^.*?pays?\s+(?:between\s+)?\$(\d+)\s*[-–—to]+\s*\$?(\d+).*$/i,
-        // Pay: $200-250, Payment: $150-200
-        /^(?:pay|payment|rate|wage):\s*\$(\d+)\s*[-–—to]+\s*\$?(\d+).*$/i,
-        // Single amount: $200, Pay: $150, This job pays $225
-        /^.*?(?:pay|payment|pays|rate|wage).*?\$(\d+)(?!\d).*$/i,
-        // Just dollar amounts: $200, $150-200
-        /^\$(\d+)(?:\s*[-–—to]+\s*\$?(\d+))?$/i
-      ];
-      
-      for (const pattern of payPatterns) {
-        const match = l.match(pattern);
-        if (match && !pay) {
-          if (match[2]) {
-            // Range found
-            pay = `$${match[1]} - $${match[2]}`;
-          } else {
-            // Single amount
-            pay = `$${match[1]}`;
-          }
-          extracted = true;
-          break;
-        }
-      }
-    }
-    
-    // Type
-    if (!extracted) {
-      let matchedType = false;
-      for (const keyword of typeKeywords) {
-        const typePattern = new RegExp(`^${keyword}(\\s*(clean|cleaning|service|services))?$`, 'i');
-        if (typePattern.test(l.toLowerCase())) {
-          const formatted = keyword.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-          if (!type.split(', ').includes(formatted)) {
-            type = type ? type + ', ' + formatted : formatted;
-          }
-          matchedType = true;
-          extracted = true;
-          break;
-        }
-      }
-    }
-    
-    // If nothing was extracted, keep this line as a note
-    if (!extracted) {
-      finalNotes.push(l);
-    }
-  });
-
-  // --- Fallback: If no type found in notes, check other fields ---
-  if (!type) {
-    // Check common type fields in payload
-    const typeFields = [
-      payload['Type of Service Needed (Check all that apply):'],
-      payload['Service Type'],
-      payload['What type of cleaning do you need?'],
-      payload['What type of space needs cleaning?'],
-      payload['Is this a residential or commercial property?'],
-      payload[' Type of Service Needed (Check all that apply):'], // with leading space
-    ];
-    for (const field of typeFields) {
-      if (Array.isArray(field)) {
-        for (const val of field) {
-          for (const keyword of typeKeywords) {
-            if (val && val.toLowerCase().includes(keyword)) {
-              const formatted = keyword.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              if (!type.split(', ').includes(formatted)) {
-                type = type ? type + ', ' + formatted : formatted;
-              }
-            }
-          }
-        }
-      } else if (typeof field === 'string') {
-        for (const keyword of typeKeywords) {
-          if (field.toLowerCase().includes(keyword)) {
-            const formatted = keyword.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            if (!type.split(', ').includes(formatted)) {
-              type = type ? type + ', ' + formatted : formatted;
-            }
-          }
-        }
-      }
-    }
+  try {
+    return {
+      id: job.id,
+      title: job.title || 'Cleaning Service',
+      clientName: job.contact?.firstName && job.contact?.lastName 
+        ? `${job.contact.firstName} ${job.contact.lastName}`
+        : job.contact?.name || 'Unknown Client',
+      phone: job.contact?.phone || 'No phone',
+      email: job.contact?.email || 'No email',
+      address: job.address || 'No address provided',
+      startTime: job.startTime,
+      endTime: job.endTime,
+      status: job.appointmentStatus || 'confirmed',
+      notes: job.notes || 'No special notes'
+    };
+  } catch (error) {
+    console.error('❌ Error extracting job for Discord:', error.message);
+    return null;
   }
-
-  pets = petMatches.length > 0 ? petMatches.join(', ') : '';
-  notes = finalNotes.join('\n');
-  
-  // Clean up notes: remove empty lines, trim, and remove any "Must be complete by" text
-  notes = notes.split('\n')
-    .map(l => l.trim())
-    .filter(l => l && !l.match(/Must be complete by .+/i))
-    .join('\n');
-
-  // Compose final Discord payload
-  return {
-    jobTitle,
-    dateTime,
-    address,
-    city,
-    bedrooms,
-    bathrooms,
-    type,
-    pets,
-    pay,
-    notes,
-  };
 }
 
 /**
- * Schedule a new job/appointment in High Level
- * @param {Object} jobData - Job data to schedule
- * @returns {Promise<Object>} Created appointment object
- */
-async function scheduleJob(jobData) {
-  const res = await fetch(BASE_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${HIGHLEVEL_PRIVATE_INTEGRATION}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(jobData),
-  });
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-  return res.json();
-}
-
-/**
- * Update an existing job/appointment in High Level
- * @param {string} jobId - ID of the job to update
- * @param {Object} updateData - Data to update
- * @returns {Promise<Object>} Updated appointment object
- */
-async function updateJob(jobId, updateData) {
-  const res = await fetch(`${BASE_URL}/${jobId}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${HIGHLEVEL_PRIVATE_INTEGRATION}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(updateData),
-  });
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-  return res.json();
-}
-
-/**
- * Delete a job/appointment in High Level
- * @param {string} jobId - ID of the job to delete
- * @returns {Promise<void>}
- */
-async function deleteJob(jobId) {
-  const res = await fetch(`${BASE_URL}/${jobId}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${HIGHLEVEL_PRIVATE_INTEGRATION}`,
-      Accept: 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-}
-
-/**
- * Get all conversations from High Level
+ * Get all conversations from High Level API - Enhanced with comprehensive testing
  * @returns {Promise<Array>} Array of conversation objects
  */
 async function getAllConversations() {
-  const url = new URL('https://rest.gohighlevel.com/v1/conversations/');
-  url.searchParams.append('locationId', process.env.HIGHLEVEL_LOCATION_ID);
-  url.searchParams.append('limit', '50');
-  url.searchParams.append('startAfterDate', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  console.log(`📱 Testing High Level API with both JWT token and Private Integration...`);
   
-  const res = await fetch(url.toString(), {
+  // Test 1: v1 API with JWT token (what we know works for contacts)
+  console.log(`🔄 Testing v1 API conversations with JWT token...`);
+  const v1Url = `https://rest.gohighlevel.com/v1/conversations/?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=50`;
+  
+  let res = await fetch(v1Url, {
     headers: {
       Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
       Accept: 'application/json',
     }
   });
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-  const data = await res.json();
-  return data.conversations || [];
+  
+  if (res.ok) {
+    const data = await res.json();
+    console.log(`✅ High Level v1 JWT API successful: found ${data.conversations?.length || 0} conversations`);
+    return data.conversations || [];
+  } else {
+    console.log(`❌ v1 JWT API failed: ${res.status} - ${res.statusText}`);
+    const v1Error = await res.text();
+    console.log(`❌ v1 Error details: ${v1Error}`);
+  }
+  
+  // Test 2: v2 API with private integration token
+  console.log(`🔄 Testing v2 API conversations with Private Integration...`);
+  const v2Url = `https://services.leadconnectorhq.com/conversations?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=50`;
+  
+  res = await fetch(v2Url, {
+    headers: {
+      Authorization: `Bearer ${process.env.HIGHLEVEL_PRIVATE_INTEGRATION}`,
+      'Version': '2021-07-28',
+      Accept: 'application/json',
+    }
+  });
+  
+  if (res.ok) {
+    const data = await res.json();
+    console.log(`✅ High Level v2 Private Integration successful: found ${data.conversations?.length || 0} conversations`);
+    return data.conversations || [];
+  } else {
+    console.log(`❌ v2 Private Integration failed: ${res.status} - ${res.statusText}`);
+  }
+  
+  // Test 3: Check what endpoints are actually available
+  console.log(`🔄 Testing available endpoints...`);
+  const endpoints = [
+    { url: `https://rest.gohighlevel.com/v1/contacts/?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=1`, auth: process.env.HIGHLEVEL_API_KEY, name: 'v1 Contacts (JWT)' },
+    { url: `https://services.leadconnectorhq.com/contacts?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=1`, auth: process.env.HIGHLEVEL_PRIVATE_INTEGRATION, name: 'v2 Contacts (PI)', version: '2021-07-28' },
+    { url: `https://rest.gohighlevel.com/v1/locations/${process.env.HIGHLEVEL_LOCATION_ID}`, auth: process.env.HIGHLEVEL_API_KEY, name: 'v1 Location Info' },
+  ];
+  
+  for (const endpoint of endpoints) {
+    const headers = {
+      Authorization: `Bearer ${endpoint.auth}`,
+      Accept: 'application/json',
+    };
+    
+    if (endpoint.version) {
+      headers['Version'] = endpoint.version;
+    }
+    
+    try {
+      const testRes = await fetch(endpoint.url, { headers });
+      
+      if (testRes.ok) {
+        console.log(`✅ ${endpoint.name}: Works!`);
+        const data = await testRes.json();
+        if (data.contacts) console.log(`   - Found ${data.contacts.length} contacts`);
+        if (data.location) console.log(`   - Location: ${data.location.name || 'N/A'}`);
+      } else {
+        console.log(`❌ ${endpoint.name}: ${testRes.status}`);
+      }
+    } catch (error) {
+      console.log(`❌ ${endpoint.name}: Error - ${error.message}`);
+    }
+  }
+  
+  console.log(`⚠️ Conversations API not available - will continue monitoring and retry`);
+  return [];
 }
 
 /**
- * Send a message via High Level
+ * Send a message via High Level API
  * @param {string} contactId - Contact ID to send message to
  * @param {string} message - Message content
  * @returns {Promise<Object>} Response object
  */
 async function sendMessage(contactId, message) {
-  const res = await fetch(`https://rest.gohighlevel.com/v1/conversations/messages`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      contactId,
-      message,
-      type: 'SMS'
-    }),
-  });
-  if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
-  return res.json();
+  try {
+    // Try v2 API first with Private Integration
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.HIGHLEVEL_PRIVATE_INTEGRATION}`,
+        'Version': '2021-07-28',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'SMS',
+        contactId: contactId,
+        message: message,
+        locationId: process.env.HIGHLEVEL_LOCATION_ID
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`❌ High Level v2 send message failed: ${res.status} - ${errorText}`);
+      
+      // Fallback to v1 API if available
+      console.log(`🔄 Trying v1 API for sending message...`);
+      const v1Res = await fetch(`https://rest.gohighlevel.com/v1/conversations/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'SMS',
+          contactId: contactId,
+          message: message,
+          locationId: process.env.HIGHLEVEL_LOCATION_ID
+        })
+      });
+      
+      if (!v1Res.ok) {
+        const v1ErrorText = await v1Res.text();
+        throw new Error(`Both v2 and v1 APIs failed: ${v1ErrorText}`);
+      }
+      
+      return await v1Res.json();
+    }
+
+    return await res.json();
+    
+  } catch (error) {
+    console.error('❌ Error sending High Level message:', error.message);
+    throw error;
+  }
 }
 
-/**
- * Create a schedule request page in Notion (placeholder)
- * @param {Object} pageData - Data for the page
- * @returns {Promise<Object>} Created page object
- */
-async function createScheduleRequestPage(pageData) {
-  // This would integrate with your existing Notion functions
-  console.log('[HighLevel] Schedule request logged:', pageData);
-  return { id: 'mock-page-id', ...pageData };
-}
-
-// Export functions for external use
 module.exports = {
   fetchAllAppointments,
-  normalizeAppointment,
   getAllJobs,
   getJobsForCleaner,
   extractJobForDiscord,
-  scheduleJob,
-  updateJob,
-  deleteJob,
   getAllConversations,
-  sendMessage,
-  createScheduleRequestPage,
+  sendMessage
 };
