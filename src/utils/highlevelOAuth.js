@@ -22,7 +22,7 @@ class HighLevelOAuth {
    * @returns {string} Authorization URL
    */
   getAuthUrl() {
-    const scopes = 'conversations/message.readonly conversations/message.write';
+    const scopes = 'contacts.readonly contacts.write conversations.readonly conversations.write conversations/message.readonly conversations/message.write locations.readonly';
     const baseUrl = 'https://marketplace.gohighlevel.com/oauth/chooselocation';
     
     const params = new URLSearchParams({
