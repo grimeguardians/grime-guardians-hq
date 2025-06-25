@@ -7,6 +7,12 @@ dist/
 .env.*
 !.env.example
 
+# OAuth token files (contain secrets)
+gmail-tokens-*.json
+*-tokens-*.json
+credentials.json
+token.json
+
 # Other common ignores
 __pycache__/
 *.pyc
