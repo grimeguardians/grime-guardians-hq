@@ -20,6 +20,7 @@ const { createScheduleRequestPage } = require('./notion');
 const MessageClassifier = require('./messageClassifier');
 const AvaTrainingSystem = require('./avaTrainingSystem');
 const ConversationManager = require('./conversationManager');
+const HighLevelOAuth = require('./highlevelOAuth');
 require('dotenv').config();
 
 class EmailCommunicationMonitor {
@@ -34,6 +35,9 @@ class EmailCommunicationMonitor {
     this.trainingSystem = new AvaTrainingSystem(client);
     this.conversationManager = new ConversationManager(client);
     
+    // High Level OAuth integration
+    this.highLevelOAuth = new HighLevelOAuth();
+    
     // Tracking
     this.lastEmailCheck = new Date();
     this.lastHighLevelCheck = new Date();
@@ -47,8 +51,8 @@ class EmailCommunicationMonitor {
     this.monitorBusinessEmails = true;        // Monitor direct business emails
     this.monitorHighLevel = true;             // Continue High Level monitoring
     console.log('🧠 Enhanced with GPT-4 classification and training system');
-    console.log('� Gmail monitoring for direct business emails');
-    console.log('📱 High Level (651-515-1478) → API Monitoring');
+    console.log('📧 Gmail monitoring for direct business emails');
+    console.log('📱 High Level (651-515-1478) → OAuth API Monitoring');
     console.log('📱 Google Voice monitoring → Separate API integration');
   }
 
@@ -142,23 +146,33 @@ class EmailCommunicationMonitor {
 
   async testHighLevelConnection() {
     try {
-      // Test with contacts endpoint (we know this works)
-      const fetch = require('node-fetch');
-      const testUrl = `https://rest.gohighlevel.com/v1/contacts/?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=1`;
+      console.log('🔗 Testing High Level OAuth connection...');
       
-      const res = await fetch(testUrl, {
-        headers: {
-          Authorization: `Bearer ${process.env.HIGHLEVEL_API_KEY}`,
-          Accept: 'application/json'
-        }
-      });
+      if (!this.highLevelOAuth.isConfigured()) {
+        throw new Error('High Level OAuth not configured. Please complete OAuth flow first.');
+      }
       
-      if (!res.ok) throw new Error(`High Level API error: ${res.status}`);
+      // Test API access
+      const testResult = await this.highLevelOAuth.testAPIAccess();
       
-      console.log('✅ High Level API connected');
+      if (!testResult.success) {
+        throw new Error(`High Level API test failed: ${testResult.error}`);
+      }
+      
+      console.log('✅ High Level OAuth API connection successful');
+      
+      // Log test results
+      const results = testResult.results;
+      console.log(`📊 Token Status: ${results.token_status.has_access_token ? '✅' : '❌'} Access Token, ${results.token_status.has_refresh_token ? '✅' : '❌'} Refresh Token`);
+      console.log(`⏰ Token Expires: ${results.token_status.expiry_time} (Expired: ${results.token_status.token_expired ? '❌' : '✅'})`);
+      console.log(`📞 Contacts API: ${results.contacts_v2?.ok ? '✅' : '❌'} (${results.contacts_v2?.status})`);
+      console.log(`💬 Conversations API: ${results.conversations_v2?.ok ? '✅' : '❌'} (${results.conversations_v2?.status})`);
+      console.log(`🏢 Location Access: ${results.location_access?.ok ? '✅' : '❌'} (${results.location_access?.status})`);
+      
+      return true;
     } catch (error) {
-      console.error('❌ High Level connection failed:', error.message);
-      throw error;
+      console.error('❌ High Level connection test failed:', error.message);
+      throw new Error(`High Level connection failed: ${error.message}`);
     }
   }
 
@@ -518,13 +532,13 @@ class EmailCommunicationMonitor {
 
   async sendHighLevelReply(messageData, replyText) {
     try {
-      // Use High Level v2 API to send reply
-      const { sendMessage } = require('./highlevel');
-      
       console.log(`[HighLevelReply] Sending reply to contact ${messageData.contactId}: ${replyText.substring(0, 50)}...`);
       
-      await sendMessage(messageData.contactId, replyText);
+      // Use OAuth handler to send message
+      const result = await this.highLevelOAuth.sendMessage(messageData.contactId, replyText, 'SMS');
+      
       console.log(`✅ High Level reply sent to ${messageData.clientName} (${messageData.clientPhone})`);
+      console.log(`📋 Message ID: ${result.id || 'unknown'}`);
       
       // Send confirmation to ops lead
       await this.sendHighLevelReplyConfirmation(messageData, replyText);
@@ -1206,11 +1220,16 @@ Keep under 160 characters for SMS:`;
   // === HIGH LEVEL CONVERSATION MONITORING ===
   async checkHighLevelConversations() {
     try {
-      console.log('📱 Checking High Level conversations...');
+      console.log('📱 Checking High Level conversations via OAuth...');
       
-      // Get conversations from High Level API
-      const { getAllConversations } = require('./highlevel');
-      const conversations = await getAllConversations();
+      if (!this.highLevelOAuth.isConfigured()) {
+        console.log('⚠️ High Level OAuth not configured, skipping conversation check');
+        this.lastHighLevelCheck = new Date();
+        return;
+      }
+      
+      // Get conversations from High Level OAuth API
+      const conversations = await this.highLevelOAuth.getConversations();
       
       if (!conversations || conversations.length === 0) {
         console.log('📱 No High Level conversations found');
@@ -1221,15 +1240,31 @@ Keep under 160 characters for SMS:`;
       console.log(`📱 Found ${conversations.length} High Level conversations`);
       
       // Filter for new messages since last check
-      const recentConversations = conversations.filter(conv => {
-        const lastMessage = conv.lastMessage;
-        if (!lastMessage || !lastMessage.dateAdded) return false;
-        
-        const messageDate = new Date(lastMessage.dateAdded);
-        return messageDate > this.lastHighLevelCheck && 
-               lastMessage.direction === 'inbound' &&
-               !this.processedHighLevelIds.has(lastMessage.id);
-      });
+      const recentConversations = [];
+      
+      for (const conversation of conversations) {
+        // Get recent messages for this conversation
+        try {
+          const messages = await this.highLevelOAuth.getMessages(conversation.id, { limit: 5 });
+          
+          if (messages && messages.length > 0) {
+            // Find the most recent inbound message
+            const recentInbound = messages.find(msg => {
+              const messageDate = new Date(msg.dateAdded);
+              return messageDate > this.lastHighLevelCheck && 
+                     msg.direction === 'inbound' &&
+                     !this.processedHighLevelIds.has(msg.id);
+            });
+            
+            if (recentInbound) {
+              conversation.lastMessage = recentInbound;
+              recentConversations.push(conversation);
+            }
+          }
+        } catch (msgError) {
+          console.error(`❌ Error getting messages for conversation ${conversation.id}:`, msgError.message);
+        }
+      }
       
       console.log(`📱 Found ${recentConversations.length} new High Level messages`);
       
@@ -1240,18 +1275,29 @@ Keep under 160 characters for SMS:`;
         if (lastMessage && !this.processedHighLevelIds.has(lastMessage.id)) {
           console.log(`📱 Processing High Level message from: ${conversation.contact?.name || conversation.contact?.phone || 'Unknown'}`);
           
+          // Get contact details if needed
+          let contactDetails = conversation.contact;
+          if (!contactDetails && conversation.contactId) {
+            try {
+              contactDetails = await this.highLevelOAuth.getContact(conversation.contactId);
+            } catch (contactError) {
+              console.error(`❌ Error getting contact details:`, contactError.message);
+              contactDetails = { name: 'Unknown', phone: '' };
+            }
+          }
+          
           // Create message data for processing
           const messageData = {
             source: 'high_level',
             businessNumber: '651-515-1478',
             conversationId: conversation.id,
             contactId: conversation.contactId,
-            clientName: conversation.contact?.name || 'Unknown',
-            clientPhone: conversation.contact?.phone || '',
+            clientName: contactDetails?.name || 'Unknown',
+            clientPhone: contactDetails?.phone || '',
             clientMessage: lastMessage.body || '',
             timestamp: new Date(lastMessage.dateAdded),
-            from: `${conversation.contact?.name || 'Unknown'} <${conversation.contact?.phone || 'no-phone'}>`,
-            subject: `High Level SMS from ${conversation.contact?.phone || 'Unknown'}`,
+            from: `${contactDetails?.name || 'Unknown'} <${contactDetails?.phone || 'no-phone'}>`,
+            subject: `High Level SMS from ${contactDetails?.phone || 'Unknown'}`,
             id: lastMessage.id,
             threadId: conversation.id
           };

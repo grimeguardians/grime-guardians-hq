@@ -12,6 +12,9 @@ class HighLevelOAuth {
     this.redirectUri = process.env.HIGHLEVEL_OAUTH_REDIRECT_URI;
     this.accessToken = process.env.HIGHLEVEL_OAUTH_ACCESS_TOKEN;
     this.refreshToken = process.env.HIGHLEVEL_OAUTH_REFRESH_TOKEN;
+    this.tokenExpiry = process.env.HIGHLEVEL_TOKEN_EXPIRY || null;
+    this.rateLimitBuffer = 100; // Buffer for rate limit (ms between requests)
+    this.lastRequestTime = 0;
   }
 
   /**
@@ -113,6 +116,10 @@ class HighLevelOAuth {
   async saveTokens(tokens) {
     this.accessToken = tokens.access_token;
     this.refreshToken = tokens.refresh_token;
+    
+    // Calculate token expiry (24 hours from now as per High Level docs)
+    const expiryTime = Date.now() + (24 * 60 * 60 * 1000); // 24 hours in milliseconds
+    this.tokenExpiry = expiryTime;
 
     // Update .env file
     const envPath = path.join(process.cwd(), '.env');
@@ -121,7 +128,8 @@ class HighLevelOAuth {
     // Update or add token lines
     const updates = {
       'HIGHLEVEL_OAUTH_ACCESS_TOKEN': tokens.access_token,
-      'HIGHLEVEL_OAUTH_REFRESH_TOKEN': tokens.refresh_token
+      'HIGHLEVEL_OAUTH_REFRESH_TOKEN': tokens.refresh_token,
+      'HIGHLEVEL_TOKEN_EXPIRY': expiryTime.toString()
     };
 
     for (const [key, value] of Object.entries(updates)) {
@@ -135,6 +143,32 @@ class HighLevelOAuth {
 
     fs.writeFileSync(envPath, envContent);
     console.log('✅ High Level OAuth tokens saved to .env file');
+    console.log(`🕒 Access token expires in 24 hours: ${new Date(expiryTime).toISOString()}`);
+  }
+
+  /**
+   * Check if access token is expired or will expire soon
+   * @returns {boolean} True if token needs refresh
+   */
+  isTokenExpired() {
+    if (!this.tokenExpiry) return true;
+    
+    // Refresh if token expires within 1 hour (buffer time)
+    const oneHour = 60 * 60 * 1000;
+    return Date.now() >= (parseInt(this.tokenExpiry) - oneHour);
+  }
+
+  /**
+   * Implement rate limiting to respect High Level's limits
+   * @returns {Promise<void>}
+   */
+  async rateLimitDelay() {
+    const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+    if (timeSinceLastRequest < this.rateLimitBuffer) {
+      const delay = this.rateLimitBuffer - timeSinceLastRequest;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    this.lastRequestTime = Date.now();
   }
 
   /**
@@ -148,10 +182,20 @@ class HighLevelOAuth {
       throw new Error('No access token available. Please complete OAuth flow first.');
     }
 
+    // Check if token is expired and refresh if needed
+    if (this.isTokenExpired()) {
+      console.log('🔄 Access token expired or expiring soon, refreshing...');
+      await this.refreshAccessToken();
+    }
+
+    // Apply rate limiting
+    await this.rateLimitDelay();
+
     // Add authorization header
     const headers = {
       Authorization: `Bearer ${this.accessToken}`,
       Accept: 'application/json',
+      'Version': '2021-07-28', // High Level API version
       ...options.headers
     };
 
@@ -160,9 +204,21 @@ class HighLevelOAuth {
       headers
     });
 
-    // If unauthorized, try to refresh token
-    if (response.status === 401) {
-      console.log('🔄 Access token expired, refreshing...');
+    // Handle rate limiting (429 status)
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After');
+      const delay = retryAfter ? parseInt(retryAfter) * 1000 : 5000; // Default 5 seconds
+      
+      console.log(`⏳ Rate limited, waiting ${delay/1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // Retry request
+      return this.makeAuthenticatedRequest(url, options);
+    }
+
+    // If unauthorized, try to refresh token once more
+    if (response.status === 401 && !this.isTokenExpired()) {
+      console.log('🔄 Received 401, attempting token refresh...');
       
       try {
         await this.refreshAccessToken();
@@ -183,10 +239,18 @@ class HighLevelOAuth {
 
   /**
    * Get conversations using OAuth token
+   * @param {Object} options - Query options (limit, skip, search, etc.)
    * @returns {Promise<Array>} Array of conversation objects
    */
-  async getConversations() {
-    const url = `https://services.leadconnectorhq.com/conversations?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=50`;
+  async getConversations(options = {}) {
+    const params = new URLSearchParams({
+      locationId: process.env.HIGHLEVEL_LOCATION_ID,
+      limit: options.limit || 50,
+      skip: options.skip || 0,
+      ...options
+    });
+    
+    const url = `https://services.leadconnectorhq.com/conversations?${params.toString()}`;
     
     const response = await this.makeAuthenticatedRequest(url);
     
@@ -200,12 +264,39 @@ class HighLevelOAuth {
   }
 
   /**
+   * Get messages for a specific conversation
+   * @param {string} conversationId - Conversation ID
+   * @param {Object} options - Query options
+   * @returns {Promise<Array>} Array of message objects
+   */
+  async getMessages(conversationId, options = {}) {
+    const params = new URLSearchParams({
+      limit: options.limit || 20,
+      skip: options.skip || 0,
+      ...options
+    });
+    
+    const url = `https://services.leadconnectorhq.com/conversations/${conversationId}/messages?${params.toString()}`;
+    
+    const response = await this.makeAuthenticatedRequest(url);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Messages API failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.messages || [];
+  }
+
+  /**
    * Send message using OAuth token
    * @param {string} contactId - Contact ID
    * @param {string} message - Message content
+   * @param {string} type - Message type (SMS, Email, etc.)
    * @returns {Promise<Object>} Send response
    */
-  async sendMessage(contactId, message) {
+  async sendMessage(contactId, message, type = 'SMS') {
     const url = 'https://services.leadconnectorhq.com/conversations/messages';
     
     const response = await this.makeAuthenticatedRequest(url, {
@@ -214,7 +305,7 @@ class HighLevelOAuth {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        type: 'SMS',
+        type: type,
         contactId: contactId,
         message: message,
         locationId: process.env.HIGHLEVEL_LOCATION_ID
@@ -230,6 +321,49 @@ class HighLevelOAuth {
   }
 
   /**
+   * Get contact information
+   * @param {string} contactId - Contact ID
+   * @returns {Promise<Object>} Contact object
+   */
+  async getContact(contactId) {
+    const url = `https://services.leadconnectorhq.com/contacts/${contactId}`;
+    
+    const response = await this.makeAuthenticatedRequest(url);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Get contact failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.contact;
+  }
+
+  /**
+   * Search contacts by phone number or email
+   * @param {string} query - Phone number or email to search
+   * @returns {Promise<Array>} Array of matching contacts
+   */
+  async searchContacts(query) {
+    const params = new URLSearchParams({
+      locationId: process.env.HIGHLEVEL_LOCATION_ID,
+      query: query
+    });
+    
+    const url = `https://services.leadconnectorhq.com/contacts/search?${params.toString()}`;
+    
+    const response = await this.makeAuthenticatedRequest(url);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Search contacts failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.contacts || [];
+  }
+
+  /**
    * Test API access with current tokens
    * @returns {Promise<Object>} Test results
    */
@@ -239,39 +373,47 @@ class HighLevelOAuth {
     }
 
     const results = {
-      contacts_v1: null,
+      token_status: {
+        has_access_token: !!this.accessToken,
+        has_refresh_token: !!this.refreshToken,
+        token_expired: this.isTokenExpired(),
+        expiry_time: this.tokenExpiry ? new Date(parseInt(this.tokenExpiry)).toISOString() : 'unknown'
+      },
       contacts_v2: null,
       conversations_v2: null,
-      messages_v2: null
+      location_access: null
     };
 
     try {
-      // Test v1 contacts
-      const v1Response = await fetch('https://rest.gohighlevel.com/v1/contacts/', {
-        headers: { 'Authorization': `Bearer ${this.accessToken}` }
+      // Test v2 contacts endpoint
+      const contactsResponse = await this.makeAuthenticatedRequest('https://services.leadconnectorhq.com/contacts/', {
+        method: 'GET'
       });
-      results.contacts_v1 = { status: v1Response.status, ok: v1Response.ok };
+      results.contacts_v2 = { 
+        status: contactsResponse.status, 
+        ok: contactsResponse.ok,
+        headers: Object.fromEntries(contactsResponse.headers.entries())
+      };
 
-      // Test v2 contacts
-      const v2Response = await fetch('https://services.leadconnectorhq.com/contacts/', {
-        headers: { 
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Version': '2021-07-28'
-        }
+      // Test v2 conversations endpoint
+      const conversationsResponse = await this.makeAuthenticatedRequest(`https://services.leadconnectorhq.com/conversations?locationId=${process.env.HIGHLEVEL_LOCATION_ID}&limit=1`, {
+        method: 'GET'
       });
-      results.contacts_v2 = { status: v2Response.status, ok: v2Response.ok };
+      results.conversations_v2 = { 
+        status: conversationsResponse.status, 
+        ok: conversationsResponse.ok,
+        headers: Object.fromEntries(conversationsResponse.headers.entries())
+      };
 
-      // Test v2 conversations
-      const convResponse = await fetch('https://services.leadconnectorhq.com/conversations/', {
-        headers: { 
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Version': '2021-07-28'
-        }
+      // Test location access
+      const locationResponse = await this.makeAuthenticatedRequest(`https://services.leadconnectorhq.com/locations/${process.env.HIGHLEVEL_LOCATION_ID}`, {
+        method: 'GET'
       });
-      results.conversations_v2 = { status: convResponse.status, ok: convResponse.ok };
-
-      // Test v2 messages (if we have a conversation ID, this would need one)
-      results.messages_v2 = { status: 'N/A', note: 'Requires conversation ID' };
+      results.location_access = { 
+        status: locationResponse.status, 
+        ok: locationResponse.ok,
+        headers: Object.fromEntries(locationResponse.headers.entries())
+      };
 
       return { success: true, results };
     } catch (error) {
