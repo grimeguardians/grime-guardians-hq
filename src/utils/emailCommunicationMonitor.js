@@ -324,7 +324,7 @@ class EmailCommunicationMonitor {
         `📞 From: ${messageData.clientPhone || 'Unknown Number'}\n` +
         `👤 Name: ${messageData.clientName || 'Not provided'}\n` +
         `💬 Message: ${messageData.clientMessage}\n` +
-        `⏰ Time: ${messageData.date?.toLocaleString() || 'Unknown'}\n`;
+        `⏰ Time: ${messageData.timestamp?.toLocaleString() || 'Unknown'}\n`;
 
       // Add LangChain analysis if available
       if (analysis) {
@@ -380,8 +380,10 @@ class EmailCommunicationMonitor {
       if (analysis && analysis.confidence > 0.8 && analysis.requires_response) {
         this.pendingGoogleVoiceReplies.set(sentMessage.id, {
           messageData,
+          clientPhone: messageData.clientPhone,
+          clientName: messageData.clientName,
+          replyText: this.generateSuggestedReply(messageData, analysis),
           analysis,
-          suggestedReply: this.generateSuggestedReply(messageData, analysis),
           timestamp: new Date()
         });
         console.log(`📝 Stored pending Google Voice reply for approval (ID: ${sentMessage.id})`);
@@ -404,7 +406,7 @@ class EmailCommunicationMonitor {
         subject: `SMS from ${messageData.clientPhone}`,
         from: messageData.clientPhone || 'unknown',
         body: messageData.clientMessage,
-        timestamp: messageData.date?.toISOString() || new Date().toISOString()
+        timestamp: messageData.timestamp?.toISOString() || new Date().toISOString()
       });
 
       console.log(`🧠 LangChain SMS Analysis:`, {
@@ -477,9 +479,9 @@ class EmailCommunicationMonitor {
   }
 
   async sendGoogleVoiceReply(pendingReply) {
-    const { messageData, suggestedReply } = pendingReply;
+    const { messageData, replyText } = pendingReply;
     
-    console.log(`[GoogleVoiceReply] Sending reply to ${messageData.clientPhone}: ${suggestedReply.substring(0, 50)}...`);
+    console.log(`[GoogleVoiceReply] Sending reply to ${messageData.clientPhone}: ${replyText.substring(0, 50)}...`);
     
     try {
       // Use broberts111592@gmail.com for Google Voice replies
@@ -491,15 +493,38 @@ class EmailCommunicationMonitor {
 
       const gmail = this.gmailClients.get(googleVoiceAccount);
       
-      // FIXED: Reply to the original Google Voice email instead of creating new email
-      // This maintains proper threading and recipient information
+      // Get the original email to extract proper headers for reply
+      const originalEmail = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageData.emailId
+      });
+      
+      // Extract headers from original email
+      let fromEmail = '';
+      let subject = '';
+      let threadId = originalEmail.data.threadId;
+      
+      if (originalEmail.data.payload && originalEmail.data.payload.headers) {
+        for (const header of originalEmail.data.payload.headers) {
+          if (header.name.toLowerCase() === 'from') {
+            fromEmail = header.value;
+          } else if (header.name.toLowerCase() === 'subject') {
+            subject = header.value;
+          }
+        }
+      }
+      
+      // Create reply subject
+      const replySubject = subject.startsWith('Re: ') ? subject : `Re: ${subject}`;
+      
+      // Create proper email reply structure
       const emailContent = [
-        `To: ${messageData.from}`,
-        `Subject: Re: ${messageData.subject}`,
-        `In-Reply-To: ${messageData.id}`,
-        `References: ${messageData.id}`,
+        `To: ${fromEmail}`,
+        `Subject: ${replySubject}`,
+        `In-Reply-To: ${messageData.emailId}`,
+        `References: ${messageData.emailId}`,
         ``,
-        suggestedReply
+        replyText
       ].join('\n');
 
       const encodedMessage = Buffer.from(emailContent)
@@ -511,15 +536,15 @@ class EmailCommunicationMonitor {
       await gmail.users.messages.send({
         userId: 'me',
         requestBody: {
-          threadId: messageData.threadId,  // Maintain thread continuity
+          threadId: threadId,  // Use the correct threadId from original email
           raw: encodedMessage
         }
       });
 
-      console.log(`✅ Google Voice reply sent to ${messageData.clientPhone} via thread reply`);
+      console.log(`✅ Google Voice reply sent to ${messageData.clientPhone} via email thread`);
       
       // Send confirmation to ops lead
-      await this.sendReplyConfirmation(messageData, suggestedReply);
+      await this.sendReplyConfirmation(messageData, replyText);
 
     } catch (error) {
       console.error('❌ Error sending Google Voice reply:', error.message);
@@ -669,7 +694,11 @@ class EmailCommunicationMonitor {
       if (analysis && analysis.confidence > 0.8 && analysis.requires_response) {
         this.pendingReplies.set(sentMessage.id, {
           messageData,
-          replyDraft: this.generateSuggestedReply(messageData, analysis),
+          contactId: messageData.contactId || messageData.contact_id,
+          conversationId: messageData.conversationId || messageData.conversation_id,
+          clientName: messageData.clientName || messageData.client_name,
+          clientPhone: messageData.clientPhone || messageData.client_phone,
+          replyText: this.generateSuggestedReply(messageData, analysis),
           messageType: 'High Level SMS',
           timestamp: new Date()
         });
@@ -1324,6 +1353,176 @@ Keep under 160 characters for SMS:`;
       console.error('❌ Error checking High Level conversations:', error.message);
       // Update last check time even on error to prevent spam
       this.lastHighLevelCheck = new Date();
+    }
+  }
+
+  /**
+   * Handle approval reaction from Discord (✅ or ❌)
+   * @param {string} messageId - Discord message ID containing the approval request
+   * @param {string} emoji - Reaction emoji (✅ or ❌)
+   * @param {string} userId - User ID who reacted
+   */
+  async handleApprovalReaction(messageId, emoji, userId) {
+    try {
+      console.log(`[ApprovalHandler] Processing reaction: ${emoji} from user ${userId} on message ${messageId}`);
+      
+      // Check if this is a High Level reply approval
+      if (this.pendingReplies.has(messageId)) {
+        const replyData = this.pendingReplies.get(messageId);
+        console.log(`[ApprovalHandler] Found pending High Level reply for message ${messageId}`);
+        
+        if (emoji === '✅') {
+          // Approved - send the reply
+          console.log(`[ApprovalHandler] Sending approved High Level reply`);
+          await this.sendHighLevelReply(replyData);
+          this.pendingReplies.delete(messageId);
+        } else if (emoji === '❌') {
+          // Rejected - remove from pending
+          console.log(`[ApprovalHandler] High Level reply rejected by user`);
+          this.pendingReplies.delete(messageId);
+        }
+        return;
+      }
+
+      // Check if this is a Google Voice reply approval
+      if (this.pendingGoogleVoiceReplies.has(messageId)) {
+        const replyData = this.pendingGoogleVoiceReplies.get(messageId);
+        console.log(`[ApprovalHandler] Found pending Google Voice reply for message ${messageId}`);
+        
+        if (emoji === '✅') {
+          // Approved - send the reply
+          console.log(`[ApprovalHandler] Sending approved Google Voice reply`);
+          await this.sendGoogleVoiceReply(replyData);
+          this.pendingGoogleVoiceReplies.delete(messageId);
+        } else if (emoji === '❌') {
+          // Rejected - remove from pending
+          console.log(`[ApprovalHandler] Google Voice reply rejected by user`);
+          this.pendingGoogleVoiceReplies.delete(messageId);
+        }
+        return;
+      }
+
+      console.log(`[ApprovalHandler] No pending reply found for message ${messageId}`);
+      
+    } catch (error) {
+      console.error('❌ Error handling approval reaction:', error.message);
+    }
+  }
+
+  /**
+   * Send approved High Level reply
+   * @param {Object} replyData - Reply data with conversation, message content, etc.
+   */
+  async sendHighLevelReply(replyData) {
+    try {
+      console.log(`[HighLevelReply] Sending reply to ${replyData.clientName}: "${replyData.replyText}"`);
+      
+      // Send via High Level OAuth API using contactId
+      const response = await this.highLevelOAuth.sendMessage(
+        replyData.contactId, // Use contactId instead of conversationId
+        replyData.replyText,
+        'SMS'
+      );
+      
+      console.log(`✅ High Level reply sent successfully`);
+      
+      // Send confirmation to Discord
+      const opsLead = await this.discordClient.users.fetch(process.env.DISCORD_OPS_LEAD_ID);
+      await opsLead.send(`✅ **Reply Sent Successfully**\n` +
+        `To: ${replyData.clientName} (${replyData.clientPhone})\n` +
+        `Message: "${replyData.replyText}"`);
+        
+    } catch (error) {
+      console.error('❌ Error sending High Level reply:', error.message);
+      
+      // Send error notification to Discord
+      const opsLead = await this.discordClient.users.fetch(process.env.DISCORD_OPS_LEAD_ID);
+      await opsLead.send(`❌ **Failed to Send Reply**\n` +
+        `Error: ${error.message}\n` +
+        `To: ${replyData.clientName}\n` +
+        `Message: "${replyData.replyText}"`);
+    }
+  }
+
+  /**
+   * Parse Google Voice email to extract SMS details
+   * @param {Object} emailData - Gmail API email data object
+   * @returns {Object} Parsed SMS data
+   */
+  parseGoogleVoiceEmail(emailData) {
+    try {
+      // Extract subject from headers
+      let subject = '';
+      let fromEmail = '';
+      
+      if (emailData.payload && emailData.payload.headers) {
+        for (const header of emailData.payload.headers) {
+          if (header.name.toLowerCase() === 'subject') {
+            subject = header.value;
+          } else if (header.name.toLowerCase() === 'from') {
+            fromEmail = header.value;
+          }
+        }
+      }
+      
+      // Extract phone number from subject line
+      const subjectMatch = subject.match(/New text message from (.+)/);
+      const fromNumber = subjectMatch ? subjectMatch[1] : 'Unknown';
+      
+      // Extract message content from email body
+      let messageContent = 'No content';
+      
+      if (emailData.payload && emailData.payload.parts) {
+        // Look for text/plain part
+        const textPart = emailData.payload.parts.find(part => part.mimeType === 'text/plain');
+        
+        if (textPart && textPart.body && textPart.body.data) {
+          // Decode base64 content
+          const decodedContent = Buffer.from(textPart.body.data, 'base64').toString('utf8');
+          
+          // Parse the Google Voice email format to extract the actual SMS text
+          const lines = decodedContent.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            // Skip Google Voice headers and find the actual message
+            if (line && 
+                !line.includes('voice.google.com') && 
+                !line.includes('To respond to this text message') &&
+                !line.includes('YOUR ACCOUNT') &&
+                !line.includes('HELP CENTER') &&
+                !line.includes('This email was sent') &&
+                !line.includes('Google LLC') &&
+                !line.includes('1600 Amphitheatre') &&
+                !line.includes('Mountain View') &&
+                line.length > 3) {
+              messageContent = line;
+              break;
+            }
+          }
+        }
+      }
+      
+      return {
+        clientPhone: fromNumber,
+        clientMessage: messageContent,
+        clientName: fromNumber, // Use phone as name since we don't have a name
+        timestamp: new Date(parseInt(emailData.internalDate) || Date.now()),
+        emailId: emailData.id,
+        type: 'google_voice_sms',
+        source: 'Google Voice (612-584-9396)'
+      };
+      
+    } catch (error) {
+      console.error('❌ Error parsing Google Voice email:', error.message);
+      return {
+        clientPhone: 'Unknown',
+        clientMessage: 'Error parsing message',
+        clientName: 'Unknown',
+        timestamp: new Date(),
+        emailId: emailData.id || 'unknown',
+        type: 'google_voice_sms',
+        source: 'Google Voice (612-584-9396)'
+      };
     }
   }
 }

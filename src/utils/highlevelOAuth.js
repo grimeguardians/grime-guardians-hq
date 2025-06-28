@@ -22,7 +22,8 @@ class HighLevelOAuth {
    * @returns {string} Authorization URL
    */
   getAuthUrl() {
-    const scopes = 'contacts.readonly contacts.write conversations.readonly conversations.write conversations/message.readonly conversations/message.write locations.readonly';
+    // Use the correct High Level scope format based on token analysis
+    const scopes = 'conversations/message.readonly conversations/message.write contacts.readonly contacts.write conversations.readonly conversations.write locations.readonly';
     const baseUrl = 'https://marketplace.gohighlevel.com/oauth/chooselocation';
     
     const params = new URLSearchParams({
@@ -250,7 +251,8 @@ class HighLevelOAuth {
       ...options
     });
     
-    const url = `https://services.leadconnectorhq.com/conversations?${params.toString()}`;
+    // Use the working conversations/search endpoint
+    const url = `https://services.leadconnectorhq.com/conversations/search?${params.toString()}`;
     
     const response = await this.makeAuthenticatedRequest(url);
     
@@ -286,7 +288,8 @@ class HighLevelOAuth {
     }
 
     const data = await response.json();
-    return data.messages || [];
+    // High Level API returns nested structure: data.messages.messages
+    return data.messages?.messages || [];
   }
 
   /**
