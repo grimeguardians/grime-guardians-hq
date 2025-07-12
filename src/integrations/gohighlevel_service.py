@@ -7,6 +7,7 @@ Handles calendar, conversations, contacts, and lead management
 import asyncio
 import aiohttp
 import json
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
@@ -176,6 +177,70 @@ class GoHighLevelService:
             logger.error(f"Error making GHL request: {e}")
             return {"error": str(e)}
     
+    async def _get_contact_details(self, contact_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch detailed contact information using contact ID."""
+        try:
+            if not contact_id:
+                return None
+                
+            endpoint = f"/contacts/{contact_id}"
+            response = await self._make_request("GET", endpoint)
+            
+            if "error" in response:
+                logger.debug(f"Could not fetch contact details for {contact_id}: {response['error']}")
+                return None
+                
+            contact_data = response.get('contact', response)
+            if isinstance(contact_data, dict):
+                return contact_data
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error fetching contact details for {contact_id}: {e}")
+            return None
+    
+    def _extract_name_from_title(self, title: str) -> str:
+        """Extract contact name from appointment title using smart patterns."""
+        try:
+            if not title or title.lower() in ['appointment', 'cleaning', 'service']:
+                return "Unknown"
+            
+            # Common patterns in cleaning appointment titles:
+            patterns = [
+                # "Destiny - Recurring Cleaning" -> "Destiny"
+                r'^([A-Za-z]+)\s*[-–—]\s*\w+',
+                # "Cleaning for Sarah Johnson" -> "Sarah Johnson"
+                r'(?:cleaning|service)\s+for\s+([A-Za-z\s]+?)(?:\s*[-–—]|$)',
+                # "Johnson, Mike - Deep Clean" -> "Johnson, Mike"
+                r'^([A-Za-z]+,\s*[A-Za-z]+)\s*[-–—]',
+                # "Mike Peterson (Property Manager)" -> "Mike Peterson"
+                r'^([A-Za-z\s]+?)\s*\(',
+                # "Smith Residence Cleaning" -> "Smith"
+                r'^([A-Za-z]+)\s+(?:residence|house|home|property)',
+                # First word that looks like a name
+                r'^([A-Z][a-z]+)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, title, re.IGNORECASE)
+                if match:
+                    name = match.group(1).strip()
+                    # Clean up the name
+                    name = re.sub(r'[^A-Za-z\s,.]', '', name).strip()
+                    if len(name) > 1 and name.lower() not in ['cleaning', 'service', 'appointment', 'recurring']:
+                        return name.title()
+            
+            # If no pattern matches, return the first word if it looks like a name
+            first_word = title.split()[0] if title.split() else ""
+            if first_word and first_word[0].isupper() and len(first_word) > 1:
+                return first_word.title()
+                
+            return "Unknown"
+            
+        except Exception as e:
+            logger.debug(f"Error extracting name from title '{title}': {e}")
+            return "Unknown"
+    
     # CALENDAR OPERATIONS (Primarily for Ava - Operations)
     
     async def get_appointments(self, start_date: Optional[datetime] = None, 
@@ -222,6 +287,8 @@ class GoHighLevelService:
                     try:
                         # Parse calendar event format
                         contact_info = event_data.get("contact", {})
+                        contact_id = event_data.get("contactId", contact_info.get("id", ""))
+                        title = event_data.get("title", event_data.get("eventTitle", "Appointment"))
                         
                         # Handle missing start/end times
                         start_time_str = event_data.get("startTime", "")
@@ -234,15 +301,35 @@ class GoHighLevelService:
                         start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
                         end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00')) if end_time_str else start_time + timedelta(hours=1)
                         
+                        # INTELLIGENT HYBRID CONTACT RESOLUTION
+                        # Try to get full contact details from API
+                        api_contact = None
+                        if contact_id:
+                            api_contact = await self._get_contact_details(contact_id)
+                        
+                        # Determine best contact information
+                        if api_contact:
+                            # Use API contact data (most reliable)
+                            contact_name = api_contact.get("name", "Unknown")
+                            contact_email = api_contact.get("email", "")
+                            contact_phone = api_contact.get("phone", "")
+                            logger.debug(f"✅ Got API contact for {title}: {contact_name}")
+                        else:
+                            # Fallback: extract from title + any embedded contact info
+                            contact_name = self._extract_name_from_title(title)
+                            contact_email = contact_info.get("email", "")
+                            contact_phone = contact_info.get("phone", "")
+                            logger.debug(f"📝 Extracted contact from title '{title}': {contact_name}")
+                        
                         appointment = GHLAppointment(
                             id=event_data.get("id", ""),
-                            title=event_data.get("title", event_data.get("eventTitle", "Appointment")),
+                            title=title,
                             start_time=start_time,
                             end_time=end_time,
-                            contact_id=event_data.get("contactId", contact_info.get("id", "")),
-                            contact_name=contact_info.get("name", event_data.get("contactName", "Unknown")),
-                            contact_phone=contact_info.get("phone", ""),
-                            contact_email=contact_info.get("email", ""),
+                            contact_id=contact_id,
+                            contact_name=contact_name,
+                            contact_phone=contact_phone,
+                            contact_email=contact_email,
                             address=event_data.get("address", contact_info.get("address1", "")),
                             status=event_data.get("status", "scheduled"),
                             notes=event_data.get("notes", event_data.get("description", "")),
@@ -254,6 +341,7 @@ class GoHighLevelService:
                         appointment._calendar_priority = priority
                         appointment._calendar_type = config["focus"]
                         appointment._responsible_agent = responsible_agent
+                        appointment._contact_source = "api" if api_contact else "extracted"
                         all_appointments.append(appointment)
                     except Exception as e:
                         logger.error(f"Error parsing event data from {calendar_name}: {e}")
