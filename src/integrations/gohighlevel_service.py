@@ -183,20 +183,101 @@ class GoHighLevelService:
             if not contact_id:
                 return None
                 
+            # Use proper API version for contacts
             endpoint = f"/contacts/{contact_id}"
-            response = await self._make_request("GET", endpoint)
             
-            if "error" in response:
-                logger.debug(f"Could not fetch contact details for {contact_id}: {response['error']}")
-                return None
-                
-            contact_data = response.get('contact', response)
-            if isinstance(contact_data, dict):
-                return contact_data
+            # Create headers specifically for contacts API
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Grime-Guardians-Agent-System/1.0",
+                "Version": "2021-07-28"  # Contacts API version
+            }
+            
+            # Choose authentication method
+            if self.pit_token:
+                headers["Authorization"] = f"Bearer {self.pit_token}"
+            elif self.oauth_token_valid and self.oauth_access_token:
+                headers["Authorization"] = f"Bearer {self.oauth_access_token}"
+            else:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            
+            url = f"{self.base_url}{endpoint}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        response_data = await response.json()
+                        contact_data = response_data.get('contact', response_data)
+                        if isinstance(contact_data, dict):
+                            return contact_data
+                    else:
+                        logger.debug(f"Contact lookup failed for {contact_id}: {response.status}")
+            
             return None
             
         except Exception as e:
             logger.debug(f"Error fetching contact details for {contact_id}: {e}")
+            return None
+    
+    async def _search_contacts_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Search for contacts using the advanced Search Contacts API."""
+        try:
+            if not name or len(name.strip()) < 2:
+                return None
+            
+            # Use the Search Contacts API (POST /contacts/search)
+            endpoint = "/contacts/search"
+            
+            # Create search payload according to API docs
+            search_data = {
+                "locationId": self.location_id,
+                "filters": [
+                    {
+                        "field": "name",
+                        "operator": "contains",
+                        "value": name.strip()
+                    }
+                ],
+                "pageLimit": 5  # Use pageLimit instead of limit
+            }
+            
+            # Use contacts API version
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Grime-Guardians-Agent-System/1.0",
+                "Version": "2021-07-28"  # Contacts API version
+            }
+            
+            # Choose authentication method
+            if self.pit_token:
+                headers["Authorization"] = f"Bearer {self.pit_token}"
+            elif self.oauth_token_valid and self.oauth_access_token:
+                headers["Authorization"] = f"Bearer {self.oauth_access_token}"
+            else:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            
+            url = f"{self.base_url}{endpoint}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=search_data) as response:
+                    if response.status == 200:
+                        response_data = await response.json()
+                        contacts = response_data.get('contacts', [])
+                        
+                        if contacts and len(contacts) > 0:
+                            # Return the first match (most relevant)
+                            best_match = contacts[0]
+                            logger.debug(f"Found contact via search: {best_match.get('name', 'Unknown')}")
+                            return best_match
+                    else:
+                        logger.debug(f"Contact search failed for '{name}': {response.status}")
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error searching contacts for '{name}': {e}")
             return None
     
     def _extract_name_from_title(self, title: str) -> str:
@@ -301,24 +382,40 @@ class GoHighLevelService:
                         start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
                         end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00')) if end_time_str else start_time + timedelta(hours=1)
                         
-                        # INTELLIGENT HYBRID CONTACT RESOLUTION
-                        # Try to get full contact details from API
+                        # ENHANCED HYBRID CONTACT RESOLUTION
+                        # Strategy: API Contact ID → Search by Name → Extract from Title
+                        
                         api_contact = None
+                        contact_source = "unknown"
+                        
+                        # Step 1: Try direct contact lookup by ID
                         if contact_id:
                             api_contact = await self._get_contact_details(contact_id)
+                            if api_contact:
+                                contact_source = "api_direct"
                         
-                        # Determine best contact information
+                        # Step 2: If no direct match, try searching by extracted name
+                        if not api_contact:
+                            extracted_name = self._extract_name_from_title(title)
+                            if extracted_name and extracted_name != "Unknown":
+                                api_contact = await self._search_contacts_by_name(extracted_name)
+                                if api_contact:
+                                    contact_source = "api_search"
+                        
+                        # Step 3: Determine best contact information
                         if api_contact:
                             # Use API contact data (most reliable)
-                            contact_name = api_contact.get("name", "Unknown")
+                            contact_name = api_contact.get("name") or api_contact.get("firstName", "") + " " + api_contact.get("lastName", "")
+                            contact_name = contact_name.strip() or "Unknown"
                             contact_email = api_contact.get("email", "")
                             contact_phone = api_contact.get("phone", "")
-                            logger.debug(f"✅ Got API contact for {title}: {contact_name}")
+                            logger.debug(f"🔗 Got API contact for {title}: {contact_name} (source: {contact_source})")
                         else:
                             # Fallback: extract from title + any embedded contact info
                             contact_name = self._extract_name_from_title(title)
                             contact_email = contact_info.get("email", "")
                             contact_phone = contact_info.get("phone", "")
+                            contact_source = "extracted"
                             logger.debug(f"📝 Extracted contact from title '{title}': {contact_name}")
                         
                         appointment = GHLAppointment(
@@ -341,7 +438,7 @@ class GoHighLevelService:
                         appointment._calendar_priority = priority
                         appointment._calendar_type = config["focus"]
                         appointment._responsible_agent = responsible_agent
-                        appointment._contact_source = "api" if api_contact else "extracted"
+                        appointment._contact_source = contact_source
                         all_appointments.append(appointment)
                     except Exception as e:
                         logger.error(f"Error parsing event data from {calendar_name}: {e}")

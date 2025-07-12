@@ -1,0 +1,17 @@
+[Unit]
+Description=Dean Strategic Sales Discord Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/grime-guardians
+Environment=PATH=/opt/grime-guardians/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/grime-guardians/venv/bin/python /opt/grime-guardians/dean_discord_runner.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
