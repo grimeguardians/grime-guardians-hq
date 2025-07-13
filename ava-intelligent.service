@@ -1,0 +1,26 @@
+[Unit]
+Description=Ava Intelligent Assistant - OpenAI Powered Discord Bot
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/opt/grime-guardians-hq
+ExecStart=/opt/grime-guardians-hq/venv/bin/python /opt/grime-guardians-hq/ava_intelligent_discord.py
+Environment=PYTHONPATH=/opt/grime-guardians-hq/src
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ava-intelligent
+
+# Resource limits
+MemoryLimit=512M
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
