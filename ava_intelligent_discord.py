@@ -10,12 +10,14 @@ from discord.ext import commands
 import structlog
 import sys
 import os
+from datetime import datetime
 
 # Add the src directory to the path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from src.config.settings import settings
 from src.agents.ava_assistant import ava_assistant
+from src.agents.ava_operations_monitor import AvaOperationsMonitor
 
 logger = structlog.get_logger()
 
@@ -51,6 +53,9 @@ class AvaIntelligentBot(commands.Bot):
         # Conversation tracking
         self.user_threads = {}  # Track thread IDs per user
         
+        # Operations monitoring system
+        self.operations_monitor = AvaOperationsMonitor(self)
+        
     async def on_ready(self):
         """Bot startup complete."""
         logger.info(f"Ava Intelligent Bot connected as {self.user}")
@@ -62,12 +67,24 @@ class AvaIntelligentBot(commands.Bot):
             logger.info("Ava Assistant initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ava Assistant: {e}")
+        
+        # Start operations monitoring
+        try:
+            await self.operations_monitor.start_monitoring()
+            logger.info("🔥 Ava Operations Monitoring started")
+        except Exception as e:
+            logger.error(f"Failed to start operations monitoring: {e}")
     
     async def on_message(self, message):
         """Handle all incoming messages."""
         # Ignore bot messages
         if message.author.bot:
             return
+        
+        # Check for check-in messages first (priority)
+        username = message.author.display_name
+        if await self.operations_monitor.handle_checkin_message(message, username):
+            return  # Check-in handled, don't process as conversation
         
         # Handle direct mentions or DMs
         if (isinstance(message.channel, discord.DMChannel) or 
@@ -186,13 +203,24 @@ class AvaIntelligentBot(commands.Bot):
             user_id = str(ctx.author.id)
             thread_status = "✅ Active" if user_id in self.user_threads else "🆕 Will create on first message"
             
+            # Check operations monitoring
+            ops_status = self.operations_monitor.get_monitoring_status()
+            monitoring_status = "✅ Active" if ops_status["monitoring_active"] else "❌ Inactive"
+            
             status_message = f"""
 🤖 **Ava Intelligent Assistant Status**
 
 **OpenAI Assistant**: {assistant_status}
 **GoHighLevel**: {ghl_status}
+**Operations Monitoring**: {monitoring_status}
 **Your Conversation**: {thread_status}
 **Active Threads**: {len(self.user_threads)}
+
+**📊 Operations Overview:**
+• Total Appointments: {ops_status["total_appointments"]}
+• Checked In: {ops_status["checked_in"]}
+• Overdue: {ops_status["overdue"]}
+• Upcoming: {ops_status["upcoming"]}
 
 Type any message to start a conversation!
 """
@@ -202,6 +230,60 @@ Type any message to start a conversation!
         except Exception as e:
             logger.error(f"Error checking status: {e}")
             await ctx.send("Error checking status.")
+    
+    @commands.command(name='monitor')
+    async def monitor_operations(self, ctx):
+        """Show detailed operations monitoring status."""
+        try:
+            ops_status = self.operations_monitor.get_monitoring_status()
+            
+            if not ops_status["monitoring_active"]:
+                await ctx.send("⚠️ Operations monitoring is not active.")
+                return
+            
+            # Get detailed appointment status
+            status_details = []
+            now = datetime.now()
+            
+            for apt in self.operations_monitor.monitored_appointments.values():
+                time_to_client = (apt.client_time - now).total_seconds() / 60
+                
+                if apt.status.value == "checked_in":
+                    status_emoji = "✅"
+                elif apt.status.value == "overdue":
+                    status_emoji = "🚨"
+                elif time_to_client < 30:  # Within 30 minutes
+                    status_emoji = "⏰"
+                else:
+                    status_emoji = "📅"
+                
+                status_details.append(
+                    f"{status_emoji} **{apt.contact_name}** ({apt.cleaner_assigned})\n"
+                    f"   Client: {apt.client_time.strftime('%I:%M %p')} | "
+                    f"Status: {apt.status.value.replace('_', ' ').title()}"
+                )
+            
+            monitor_message = f"""
+🔥 **Operations Monitoring Dashboard**
+
+**Summary:**
+• Monitoring: {"✅ Active" if ops_status["monitoring_active"] else "❌ Inactive"}
+• Total Appointments: {ops_status["total_appointments"]}
+• Checked In: {ops_status["checked_in"]}
+• Overdue Check-ins: {ops_status["overdue"]}
+• Upcoming: {ops_status["upcoming"]}
+
+**Today's Appointments:**
+{chr(10).join(status_details[:10]) if status_details else "No appointments today"}
+
+Legend: ✅ Checked In | 🚨 Overdue | ⏰ Due Soon | 📅 Scheduled
+"""
+            
+            await self.send_long_message(ctx.channel, monitor_message.strip())
+            
+        except Exception as e:
+            logger.error(f"Error checking monitor status: {e}")
+            await ctx.send("Error checking operations monitor.")
     
     async def close(self):
         """Clean shutdown."""
