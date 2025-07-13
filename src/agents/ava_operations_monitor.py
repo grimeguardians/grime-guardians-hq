@@ -6,7 +6,7 @@ Monitors all appointments, check-ins, and operational compliance in real-time
 import asyncio
 import discord
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 import structlog
 from dataclasses import dataclass, field
 from enum import Enum
