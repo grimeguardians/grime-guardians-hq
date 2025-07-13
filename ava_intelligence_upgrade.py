@@ -110,7 +110,7 @@ class AvaGoHighLevelIntegration:
             
             appointments = await self.ghl_service.get_appointments(start_date, end_date)
             
-            # Convert to dict format for Discord display
+            # Convert to dict format for Discord display (preserve metadata)
             appointment_dicts = []
             for apt in appointments:
                 apt_dict = {
@@ -127,7 +127,12 @@ class AvaGoHighLevelIntegration:
                     'status': apt.status,
                     'notes': apt.notes,
                     'assignedUser': apt.assigned_user,
-                    'serviceType': apt.service_type
+                    'serviceType': apt.service_type,
+                    # Preserve calendar metadata
+                    '_calendar_priority': getattr(apt, '_calendar_priority', 1),
+                    '_calendar_type': getattr(apt, '_calendar_type', 'residential_commercial_cleaning'),
+                    '_responsible_agent': getattr(apt, '_responsible_agent', 'ava'),
+                    '_contact_source': getattr(apt, '_contact_source', 'api')
                 }
                 appointment_dicts.append(apt_dict)
             
@@ -204,12 +209,12 @@ class AvaIntelligentResponse:
             commercial_appointments = []
             
             for apt in appointments:
-                calendar_type = getattr(apt, '_calendar_type', 'unknown')
-                if 'residential_commercial_cleaning' in calendar_type:
+                calendar_type = apt.get('_calendar_type', 'residential_commercial_cleaning')
+                if calendar_type == 'residential_commercial_cleaning':
                     cleaning_appointments.append(apt)
-                elif 'lead_qualification' in calendar_type:
+                elif calendar_type == 'lead_qualification':
                     walkthrough_appointments.append(apt)
-                elif 'commercial_lead_generation' in calendar_type:
+                elif calendar_type == 'commercial_lead_generation':
                     commercial_appointments.append(apt)
             
             # Display by priority
