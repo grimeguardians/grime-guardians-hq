@@ -34,9 +34,6 @@ class AvaAssistant:
         self.assistant_id = None
         self.thread_id = None
         self.knowledge_base = {}
-        
-        # Initialize assistant on startup
-        asyncio.create_task(self._initialize_assistant())
     
     async def _initialize_assistant(self):
         """Initialize or retrieve the Ava assistant."""
