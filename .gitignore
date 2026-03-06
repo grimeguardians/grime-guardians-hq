@@ -1,0 +1,60 @@
+# Environment & credentials — NEVER commit these
+.env
+.env.*
+!.env.template
+*.rtf
+client_secret*.json
+*credentials*.json
+token.json
+service_account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+venv_linux/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (legacy)
+node_modules/
+
+# Data / file uploads
+data/files/
+uploads/
+
+# Misc
+*.pem
+*.key
