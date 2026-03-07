@@ -1,125 +1,127 @@
 """
 Grime Guardians Agentic Suite - Agent Implementations
-Complete 8-agent system following 12-factor methodology
-"""
+Complete agent system following 12-factor methodology.
 
-from .base_agent import BaseAgent, AgentTool, AgentManager
-from .ava_orchestrator import AvaOrchestrator
-from .sophia_booking_coordinator import SophiaBookingCoordinator
-from .keith_checkin_tracker import KeithCheckinTracker
-from .maya_coaching_agent import MayaCoachingAgent
-from .dmitri_escalation_agent import DmitriEscalationAgent
-from .remaining_specialists import (
-    IrisOnboardingAgent,
-    BrunoBonusTracker,
-    AidenAnalyticsAgent
-)
-from .dean_cmo_agent import DeanCMOAgent
-from .emma_cxo_agent import EmmaCXOAgent
-from .brandon_ceo_agent import BrandonCEOAgent
+All imports are lazy to avoid pulling in optional heavy dependencies
+(cv2, PIL, etc.) unless those agents are explicitly used.
+"""
 
 __all__ = [
     # Base framework
     "BaseAgent",
-    "AgentTool", 
+    "AgentTool",
     "AgentManager",
-    
-    # COO Operations Team (Ava + 5 specialists)
-    "AvaOrchestrator",           # COO - Master coordination and business rule enforcement
-    "SophiaBookingCoordinator",  # Operations scheduling and logistics coordination
-    "KeithCheckinTracker",       # Contractor status monitoring and geographic optimization
-    "MayaCoachingAgent",         # Performance coaching and skill development
-    "DmitriEscalationAgent",     # Operations escalation and quality enforcement
-    "IrisOnboardingAgent",       # New contractor onboarding and training
-    "BrunoBonusTracker",         # Referral bonuses and recognition system
-    
-    # CFO Analytics (separate from operations)
-    "AidenAnalyticsAgent",       # CFO - Financial analytics and revenue reporting
-    
+    # COO Operations Team
+    "AvaOrchestrator",
+    "SophiaBookingCoordinator",
+    "KeithCheckinTracker",
+    "MayaCoachingAgent",
+    "DmitriEscalationAgent",
+    "IrisOnboardingAgent",
+    "BrunoBonusTracker",
+    # CFO Analytics
+    "AidenAnalyticsAgent",
     # C-Suite Executive Leadership
-    "DeanCMOAgent",             # CMO - Sales, quotes, marketing, customer acquisition
-    "EmmaCXOAgent",             # CXO - Customer experience, support, complaints, satisfaction
-    "BrandonCEOAgent"           # CEO - Strategic decisions, escalations, partnerships, vision
+    "DeanCMOAgent",
+    "EmmaCXOAgent",
+    "BrandonCEOAgent",
+    # Getters
+    "get_dean_cmo_agent",
+    "get_emma_cxo_agent",
+    "get_brandon_ceo_agent",
+    "get_agent_manager",
+    "create_agent",
+    "initialize_agent_system",
 ]
 
-# Agent factory for easy instantiation
+
+def __getattr__(name):
+    """Lazy-load agent classes and functions on first access."""
+    _lazy_map = {
+        "BaseAgent":               ("base_agent",                "BaseAgent"),
+        "AgentTool":               ("base_agent",                "AgentTool"),
+        "AgentManager":            ("base_agent",                "AgentManager"),
+        "AvaOrchestrator":         ("ava_orchestrator",          "AvaOrchestrator"),
+        "SophiaBookingCoordinator":("sophia_booking_coordinator","SophiaBookingCoordinator"),
+        "KeithCheckinTracker":     ("keith_checkin_tracker",     "KeithCheckinTracker"),
+        "MayaCoachingAgent":       ("maya_coaching_agent",       "MayaCoachingAgent"),
+        "DmitriEscalationAgent":   ("dmitri_escalation_agent",   "DmitriEscalationAgent"),
+        "IrisOnboardingAgent":     ("remaining_specialists",     "IrisOnboardingAgent"),
+        "BrunoBonusTracker":       ("remaining_specialists",     "BrunoBonusTracker"),
+        "AidenAnalyticsAgent":     ("remaining_specialists",     "AidenAnalyticsAgent"),
+        "DeanCMOAgent":            ("dean_cmo_agent",            "DeanCMOAgent"),
+        "EmmaCXOAgent":            ("emma_cxo_agent",            "EmmaCXOAgent"),
+        "BrandonCEOAgent":         ("brandon_ceo_agent",         "BrandonCEOAgent"),
+        "get_dean_cmo_agent":      ("dean_cmo_agent",            "get_dean_cmo_agent"),
+        "get_emma_cxo_agent":      ("emma_cxo_agent",            "get_emma_cxo_agent"),
+        "get_brandon_ceo_agent":   ("brandon_ceo_agent",         "get_brandon_ceo_agent"),
+    }
+    if name in _lazy_map:
+        module_name, attr = _lazy_map[name]
+        import importlib
+        mod = importlib.import_module(f".{module_name}", package=__name__)
+        return getattr(mod, attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def get_agent_manager():
+    """Get singleton agent manager instance (initialization required)."""
+    return None
+
+
 def create_agent(agent_id: str, business_context=None):
     """
     Factory function to create agents by ID.
-    
+
     Args:
-        agent_id: One of 'ava', 'sophia', 'keith', 'maya', 'dmitri', 'iris', 'bruno', 'aiden', 'dean', 'emma', 'brandon'
+        agent_id: One of 'ava', 'sophia', 'keith', 'maya', 'dmitri',
+                  'iris', 'bruno', 'aiden', 'dean', 'emma', 'brandon'
         business_context: Optional BusinessContext for agent initialization
-    
+
     Returns:
         Instantiated agent of the specified type
     """
-    agent_classes = {
-        # COO Operations Team
-        "ava": AvaOrchestrator,
-        "sophia": SophiaBookingCoordinator,
-        "keith": KeithCheckinTracker,
-        "maya": MayaCoachingAgent,
-        "dmitri": DmitriEscalationAgent,
-        "iris": IrisOnboardingAgent,
-        "bruno": BrunoBonusTracker,
-        # CFO Analytics
-        "aiden": AidenAnalyticsAgent,
-        # C-Suite Leadership
-        "dean": DeanCMOAgent,
-        "emma": EmmaCXOAgent,
-        "brandon": BrandonCEOAgent
+    _id_map = {
+        "ava":     ("ava_orchestrator",           "AvaOrchestrator"),
+        "sophia":  ("sophia_booking_coordinator", "SophiaBookingCoordinator"),
+        "keith":   ("keith_checkin_tracker",      "KeithCheckinTracker"),
+        "maya":    ("maya_coaching_agent",         "MayaCoachingAgent"),
+        "dmitri":  ("dmitri_escalation_agent",    "DmitriEscalationAgent"),
+        "iris":    ("remaining_specialists",       "IrisOnboardingAgent"),
+        "bruno":   ("remaining_specialists",       "BrunoBonusTracker"),
+        "aiden":   ("remaining_specialists",       "AidenAnalyticsAgent"),
+        "dean":    ("dean_cmo_agent",              "DeanCMOAgent"),
+        "emma":    ("emma_cxo_agent",              "EmmaCXOAgent"),
+        "brandon": ("brandon_ceo_agent",           "BrandonCEOAgent"),
     }
-    
-    if agent_id not in agent_classes:
-        raise ValueError(f"Unknown agent_id: {agent_id}. Available: {list(agent_classes.keys())}")
-    
-    return agent_classes[agent_id](business_context)
+    if agent_id not in _id_map:
+        raise ValueError(
+            f"Unknown agent_id: {agent_id!r}. Available: {list(_id_map)}"
+        )
+    import importlib
+    module_name, cls_name = _id_map[agent_id]
+    mod = importlib.import_module(f".{module_name}", package=__name__)
+    cls = getattr(mod, cls_name)
+    return cls(business_context)
 
-# Agent system initialization
+
 async def initialize_agent_system(business_context=None):
     """
     Initialize the complete 11-agent system with C-Suite leadership.
-    
+
     Args:
         business_context: Optional BusinessContext for all agents
-    
+
     Returns:
         AgentManager with all agents registered and ready
     """
+    from .base_agent import AgentManager
     manager = AgentManager()
-    
-    # Create and register all agents
     agent_ids = [
-        # COO Operations Team
         "ava", "sophia", "keith", "maya", "dmitri", "iris", "bruno",
-        # CFO Analytics
-        "aiden",
-        # C-Suite Leadership
-        "dean", "emma", "brandon"
+        "aiden", "dean", "emma", "brandon",
     ]
-    
     for agent_id in agent_ids:
         agent = create_agent(agent_id, business_context)
         manager.register_agent(agent)
-    
     return manager
-
-# Singleton getters for direct agent access
-def get_agent_manager():
-    """Get singleton agent manager instance."""
-    # This would typically maintain a global singleton
-    # For now, return None to indicate initialization required
-    return None
-
-# Individual agent getters for the new C-Suite agents
-from .dean_cmo_agent import get_dean_cmo_agent
-from .emma_cxo_agent import get_emma_cxo_agent  
-from .brandon_ceo_agent import get_brandon_ceo_agent
-
-__all__.extend([
-    "get_dean_cmo_agent",
-    "get_emma_cxo_agent", 
-    "get_brandon_ceo_agent",
-    "get_agent_manager"
-])
