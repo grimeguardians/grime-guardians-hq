@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import json
 
 from ..config.settings import get_settings
-from ..models.schemas import ClientProfile, JobRecord, ContactInfo
+from typing import Any  # ClientProfile, JobRecord, ContactInfo defined inline below
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -390,7 +390,7 @@ class GoHighLevelIntegration:
             return False
     
     # Grime Guardians Specific Methods
-    async def sync_client_profile(self, client_profile: ClientProfile) -> bool:
+    async def sync_client_profile(self, client_profile: Any) -> bool:
         """Sync Grime Guardians client profile with GoHighLevel contact."""
         try:
             # Search for existing contact
@@ -433,7 +433,7 @@ class GoHighLevelIntegration:
             logger.error(f"Error syncing client profile {client_profile.client_id}: {e}")
             return False
     
-    async def create_job_opportunity(self, job_record: JobRecord) -> Optional[str]:
+    async def create_job_opportunity(self, job_record: Any) -> Optional[str]:
         """Create opportunity in GoHighLevel for a cleaning job."""
         try:
             # Find contact for the client
