@@ -215,7 +215,7 @@ Return JSON: {{"title": "...", "content": "...", "hashtags": [...], "target_audi
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=settings.openai_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=600,
                 temperature=0.8,
@@ -256,7 +256,7 @@ Return JSON: {{"title": "...", "content": "...", "hashtags": [...], "target_audi
 
         try:
             resp = await self.openai_client.chat.completions.create(
-                model="gpt-4o",
+                model=settings.openai_model,
                 messages=[{"role": "user", "content": variant_b_prompt}],
                 max_tokens=500,
                 temperature=0.8,
