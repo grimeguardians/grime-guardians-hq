@@ -180,19 +180,22 @@ class GoHighLevelIntegration:
             return None
     
     async def search_contacts(
-        self, 
-        phone: Optional[str] = None, 
+        self,
+        phone: Optional[str] = None,
         email: Optional[str] = None,
-        name: Optional[str] = None
+        name: Optional[str] = None,
+        query: Optional[str] = None,       # alias for name
     ) -> List[GoHighLevelContact]:
         """Search for contacts by phone, email, or name."""
-        params = {}
+        params = {"locationId": self.location_id}
         if phone:
             params["phone"] = phone
         if email:
             params["email"] = email
-        if name:
-            params["query"] = name
+        # Accept either `name` or `query` as the search term
+        search_term = name or query
+        if search_term:
+            params["query"] = search_term
         
         try:
             response = await self._make_request("GET", "contacts/", params=params)
@@ -328,6 +331,47 @@ class GoHighLevelIntegration:
             return None
     
     # Calendar Integration
+    async def get_appointments(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        calendar_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get appointments for a date range from GoHighLevel.
+
+        Args:
+            start_date: ISO date string, e.g. '2026-03-07'. Defaults to today.
+            end_date:   ISO date string. Defaults to 7 days from start.
+            calendar_id: Specific calendar to query. Falls back to settings.
+
+        Returns:
+            List of raw appointment dicts from GHL.
+        """
+        today = datetime.now()
+        if not start_date:
+            start_date = today.strftime("%Y-%m-%d")
+        if not end_date:
+            end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        cal_id = calendar_id or self.location_id  # Use calendar_id from settings if set
+        if settings.highlevel_calendar_id:
+            cal_id = settings.highlevel_calendar_id
+
+        params = {
+            "locationId": self.location_id,
+            "startDate": start_date,
+            "endDate": end_date,
+        }
+        if cal_id and cal_id != self.location_id:
+            params["calendarId"] = cal_id
+
+        try:
+            response = await self._make_request("GET", "appointments/", params=params)
+            return response.get("appointments", [])
+        except Exception as e:
+            logger.error(f"Error fetching appointments ({start_date} → {end_date}): {e}")
+            return []
+
     async def get_calendars(self) -> List[Dict[str, Any]]:
         """Get available calendars for appointment scheduling."""
         try:
