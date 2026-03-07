@@ -72,7 +72,59 @@ class GrimeGuardiansBot(commands.Bot):
         
         self.channels: Dict[str, discord.TextChannel] = {}
         self.message_handlers: Dict[str, Callable] = {}
-        
+
+        # Ava assistant — lazy import to avoid circular dependency
+        self._ava = None
+
+    def _get_ava(self):
+        if self._ava is None:
+            from ..agents.ava_assistant import get_ava
+            self._ava = get_ava()
+        return self._ava
+
+    async def on_message(self, message: discord.Message):
+        """Route messages to Ava when bot is mentioned or in DMs."""
+        # Never respond to ourselves
+        if message.author.bot:
+            return
+
+        # Process commands first (e.g. !gg status)
+        await self.process_commands(message)
+
+        # Respond if mentioned or in a DM
+        is_mentioned = self.user in message.mentions
+        is_dm = isinstance(message.channel, discord.DMChannel)
+
+        if not (is_mentioned or is_dm):
+            return
+
+        # Strip the mention from the message content
+        content = message.content
+        if self.user.mention in content:
+            content = content.replace(self.user.mention, "").strip()
+        if not content:
+            return
+
+        channel_id = str(message.channel.id)
+        username = message.author.display_name
+
+        async with message.channel.typing():
+            try:
+                ava = self._get_ava()
+                response = await ava.chat(content, channel_id, username)
+            except Exception as e:
+                logger.error(f"Ava response error: {e}", exc_info=True)
+                response = "I hit an error processing that. Try again or ping Brandon directly."
+
+        # Discord has a 2000 char limit per message
+        if len(response) <= 2000:
+            await message.reply(response)
+        else:
+            # Split into chunks
+            for i in range(0, len(response), 1900):
+                chunk = response[i:i+1900]
+                await message.channel.send(chunk)
+
     async def on_ready(self):
         """Bot ready event handler."""
         logger.info(f'{self.user} has connected to Discord!')
