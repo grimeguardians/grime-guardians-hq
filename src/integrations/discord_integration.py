@@ -13,7 +13,8 @@ from dataclasses import dataclass
 import json
 
 from ..config.settings import get_settings
-from ..models.schemas import JobRecord, ContractorStatus, QualityViolation
+from ..models.schemas import JobSchema as JobRecord, QualityViolationSchema as QualityViolation
+from ..models.types import ContractorStatus
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

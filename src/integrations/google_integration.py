@@ -15,7 +15,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from ..config.settings import get_settings
-from ..models.schemas import JobRecord, ClientProfile
+from ..models.schemas import JobSchema as JobRecord
+from typing import Any as ClientProfile  # placeholder
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
