@@ -307,10 +307,18 @@ class AvaAssistant:
                 content=f"[{username}]: {message}",
             )
 
+            # Inject current date so the model can resolve "today", "this friday", etc.
+            now = datetime.now()
+            date_context = (
+                f"Current date and time: {now.strftime('%A, %B %d, %Y at %I:%M %p')} Central Time. "
+                f"Use this as the reference for all date-related questions."
+            )
+
             # Run the assistant
             run = await self.client.beta.threads.runs.create(
                 thread_id=thread_id,
                 assistant_id=self.assistant_id,
+                additional_instructions=date_context,
             )
 
             # Poll until complete, handling tool calls
