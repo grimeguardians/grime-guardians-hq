@@ -275,11 +275,10 @@ class InboundRouter:
         from .approval_view import ApprovalView
 
         bot: GrimeGuardiansBot = self.bot
-        channel_key = route.get("alert_channel", "general")
-        channel = bot.channels.get(channel_key) or bot.channels.get("general")
+        channel = bot.get_channel(1481493060667052062)  # #ops-comms
 
         if not channel:
-            logger.error(f"No Discord channel found for key '{channel_key}'.")
+            logger.error("Could not find #ops-comms channel (ID 1481493060667052062).")
             return
 
         agent = route["agent"]
