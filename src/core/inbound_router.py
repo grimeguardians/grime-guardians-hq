@@ -112,18 +112,24 @@ class InboundRouter:
 
     def _parse_payload(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Parse GHL workflow webhook payload into a normalized message dict.
-        GHL workflow webhooks vary in shape — handle the common variants.
+        Parse GHL webhook payload into a normalized message dict.
+        Handles both native location webhooks (InboundMessage event) and
+        workflow webhook shapes.
         """
-        # Try to extract contact info from multiple possible locations
+        # GHL native webhook wraps data under a top-level event key
+        # e.g. {"type": "InboundMessage", "message": {...}, "contact": {...}}
+        # Normalize nested message/contact objects if present
+        nested_msg = payload.get("message", {}) if isinstance(payload.get("message"), dict) else {}
         contact = payload.get("contact", payload.get("Contact", {}))
         if isinstance(contact, str):
             contact = {}
 
         contact_name = (
             contact.get("name") or
+            contact.get("fullName") or
             contact.get("full_name") or
-            f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip() or
+            f"{payload.get('firstName', '') or contact.get('firstName', '')} "
+            f"{payload.get('lastName', '') or contact.get('lastName', '')}".strip() or
             payload.get("contact_name", "Unknown")
         )
 
@@ -148,25 +154,41 @@ class InboundRouter:
 
         conversation_id = (
             payload.get("conversationId") or
+            nested_msg.get("conversationId") or
             payload.get("conversation_id") or
             payload.get("ConversationId", "")
         )
 
-        # Message body — try multiple field names GHL uses
+        # Message body — native webhook uses nested message.body; workflow uses top-level fields
         body = (
-            payload.get("message") or
-            payload.get("body") or
+            nested_msg.get("body") or
+            nested_msg.get("text") or
             payload.get("messageBody") or
-            payload.get("Message") or
             payload.get("smsBody") or
+            payload.get("body") or
+            payload.get("Message") or
             ""
-        ).strip()
+        )
+        # Skip if payload.message was a string (workflow shape — already handled above)
+        if not body and isinstance(payload.get("message"), str):
+            body = payload["message"]
+        body = body.strip() if body else ""
 
         if not body:
             logger.warning("Webhook payload has no message body — skipping.")
             return None
 
+        # Skip outbound messages (direction field present in native webhooks)
+        direction = (
+            nested_msg.get("direction") or
+            payload.get("direction", "")
+        ).lower()
+        if direction == "outbound":
+            logger.info("Skipping outbound message webhook.")
+            return None
+
         msg_type = (
+            nested_msg.get("type") or
             payload.get("type") or
             payload.get("messageType") or
             payload.get("channel") or
