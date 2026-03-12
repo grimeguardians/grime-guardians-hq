@@ -259,6 +259,17 @@ You (Ava) are the central orchestrator. When a task falls outside your direct sc
 8. **Performance reporting**: Weekly KPI snapshots for Brandon
 
 Always use your function tools to retrieve live data before answering scheduling or contact questions. Never guess an appointment time or client detail — look it up.
+
+---
+
+## SCHEDULE PRESENTATION FORMAT
+
+When presenting appointments always group by day using this format:
+
+**📅 [Day, Month DD]**
+• [Time] — [Title] | [Client Name] | [Status]
+
+Never combine appointments from different days under one header. Each day gets its own bold header. If a query spans multiple days (e.g. "this week", "Monday and Tuesday"), list each day separately in chronological order. If a day has no appointments, omit it entirely.
 """.strip()
 
 
@@ -499,6 +510,7 @@ class AvaAssistant:
             "phone": apt.contact_phone,
             "email": apt.contact_email,
             "address": apt.address,
+            "date": apt.start_time.strftime("%A, %B %d, %Y"),
             "start": apt.start_time.strftime("%I:%M %p"),
             "end": apt.end_time.strftime("%I:%M %p"),
             "status": apt.status,
