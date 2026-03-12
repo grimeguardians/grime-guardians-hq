@@ -385,18 +385,33 @@ class InboundRouter:
             return f"Hi {contact.split()[0]}! Thanks for reaching out to Grime Guardians. We'll be in touch shortly."
 
     def _get_agent_prompt(self, agent: str) -> str:
-        """Return the full persona system prompt for the drafting agent."""
+        """
+        Return the full persona system prompt for the drafting agent.
+
+        ROUTING INTENT (current state vs. target state):
+        - Dean (CMO): handles leads, pricing, sales — NOT yet live in Discord.
+          Until Dean's Discord bot launches, his drafts still post to #ops-comms
+          for Brandon to approve. Once Dean is live, his bot will post independently.
+        - Ava (COO): handles ops, scheduling, cleaner comms — LIVE.
+          During the interim period, Ava also drafts for sales inquiries with
+          full pricing context so nothing falls through the cracks.
+        - Emma (CXO): handles complaints/retention — NOT yet live in Discord.
+        """
+        SMS_RULES = (
+            "\n\nDRAFTING RULES FOR SMS:\n"
+            "- Keep replies under 160 characters unless the client asked a detailed question.\n"
+            "- Never reuse an opener already used earlier in this conversation.\n"
+            "- Output ONLY the message text — no subject lines, no sign-off, no markdown.\n"
+            "- Be specific to what the client said. No filler phrases."
+        )
+
         if "Dean" in agent:
             from ..agents.dean_cmo_agent import DeanCMOAgent
             base = DeanCMOAgent()._get_system_prompt()
             return (
-                base + "\n\n"
-                "DRAFTING RULES FOR SMS/TEXT:\n"
-                "- Keep replies under 160 characters unless the client asked a detailed question.\n"
-                "- Never reuse an opener already used earlier in this conversation.\n"
-                "- Output ONLY the message text — no subject lines, no sign-off, no formatting.\n"
-                "- Quote the correct price tier based on home size and service type the client mentioned.\n"
-                "- When home size is unknown, ask one qualifying question before quoting."
+                base + SMS_RULES +
+                "\n- Quote the correct price tier based on home size and service type mentioned."
+                "\n- When home size is unknown, ask one qualifying question before quoting."
             )
         elif "Emma" in agent:
             return (
@@ -404,18 +419,22 @@ class InboundRouter:
                 "You handle client experience, complaints, and retention. "
                 "Your tone is empathetic, calm, and solution-focused. "
                 "Acknowledge the specific issue raised, take ownership, and offer a clear next step. "
-                "Never get defensive. Turn every complaint into a retention opportunity. "
-                "Be specific to what they said — no generic responses. "
-                "Keep SMS replies under 160 characters. Output ONLY the message text."
+                "Never get defensive. Turn every complaint into a retention opportunity."
+                + SMS_RULES
             )
         else:
+            # Ava (COO) — also handles sales/leads in the interim until Dean's bot is live.
+            # She has full pricing knowledge so nothing gets misquoted.
+            from ..agents.dean_cmo_agent import DeanCMOAgent
+            dean_pricing = DeanCMOAgent()._get_system_prompt()
             return (
                 "You are Ava, COO of Grime Guardians — a premium Twin Cities cleaning company. "
-                "You handle operations, scheduling, and cleaner logistics. "
-                "Your tone is direct, professional, and efficient. "
-                "Lead with the answer, keep it brief, and always give a clear next step. "
-                "Be specific to what was asked — no filler phrases. "
-                "Keep SMS replies under 160 characters. Output ONLY the message text."
+                "You handle operations, scheduling, cleaner logistics, and (in the interim) "
+                "sales inquiries until the CMO bot is live.\n\n"
+                "For OPS messages: be direct, efficient, lead with the answer, give a clear next step.\n"
+                "For SALES/PRICING messages: use the full pricing context below and never misquote.\n\n"
+                + dean_pricing
+                + SMS_RULES
             )
 
     # ─── Discord Posting ──────────────────────────────────────────────────────
