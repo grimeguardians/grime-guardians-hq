@@ -234,6 +234,11 @@ class GoHighLevelIntegration:
         start_dt = datetime.fromisoformat(start_date) if start_date else today
         end_dt = datetime.fromisoformat(end_date) if end_date else (today + timedelta(days=7))
 
+        # If end is the same as start (or has no time component), extend to end of that day
+        # so a single-date query like start=2026-03-13, end=2026-03-13 captures all day's events
+        if end_dt <= start_dt:
+            end_dt = start_dt.replace(hour=23, minute=59, second=59)
+
         # GHL v2 calendar events require Unix millisecond timestamps
         start_ms = int(start_dt.timestamp() * 1000)
         end_ms = int(end_dt.timestamp() * 1000)
