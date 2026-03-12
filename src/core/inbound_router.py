@@ -402,6 +402,7 @@ class InboundRouter:
 
         view = ApprovalView(
             conversation_id=msg["conversation_id"],
+            contact_id=msg["contact_id"],
             draft=draft,
             contact_name=contact,
             msg_type=msg["msg_type"],

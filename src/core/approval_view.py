@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 async def _send_via_ghl(
     conversation_id: str,
+    contact_id: str,
     message: str,
     msg_type: str,
 ) -> bool:
@@ -23,6 +24,7 @@ async def _send_via_ghl(
         async with GoHighLevelIntegration() as ghl:
             return await ghl.send_message(
                 conversation_id=conversation_id,
+                contact_id=contact_id,
                 message=message,
                 message_type=msg_type if msg_type in ("SMS", "Email") else "SMS",
             )
@@ -60,6 +62,7 @@ class AmendModal(discord.ui.Modal, title="Amend Message"):
         if self.approval_view.conversation_id and new_message:
             sent = await _send_via_ghl(
                 self.approval_view.conversation_id,
+                self.approval_view.contact_id,
                 new_message,
                 self.approval_view.msg_type,
             )
@@ -116,6 +119,7 @@ class ApprovalView(discord.ui.View):
     def __init__(
         self,
         conversation_id: str,
+        contact_id: str,
         draft: str,
         contact_name: str,
         msg_type: str = "SMS",
@@ -123,6 +127,7 @@ class ApprovalView(discord.ui.View):
     ):
         super().__init__(timeout=timeout)
         self.conversation_id = conversation_id
+        self.contact_id = contact_id
         self.draft = draft
         self.contact_name = contact_name
         self.msg_type = msg_type
@@ -132,7 +137,7 @@ class ApprovalView(discord.ui.View):
         """Send the drafted message via GHL and update the embed."""
         await interaction.response.defer()
 
-        sent = await _send_via_ghl(self.conversation_id, self.draft, self.msg_type)
+        sent = await _send_via_ghl(self.conversation_id, self.contact_id, self.draft, self.msg_type)
 
         for child in self.children:
             child.disabled = True
