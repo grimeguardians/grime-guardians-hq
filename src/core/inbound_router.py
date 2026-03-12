@@ -311,21 +311,59 @@ class InboundRouter:
 
     # ─── Draft Generation ─────────────────────────────────────────────────────
 
+    async def _fetch_conversation_history(self, conversation_id: str) -> str:
+        """Fetch last few messages from GHL to give the agent context."""
+        if not conversation_id:
+            return ""
+        try:
+            async with GoHighLevelIntegration() as ghl:
+                resp = await ghl._request(
+                    "GET",
+                    f"/conversations/{conversation_id}/messages",
+                    params={"limit": 6},
+                )
+                messages = resp.get("messages", {}).get("messages", [])
+                if not messages:
+                    return ""
+                lines = []
+                for m in reversed(messages):
+                    direction = m.get("direction", "").lower()
+                    role = "Client" if direction == "inbound" else "Us"
+                    body = (m.get("body") or m.get("text", "")).strip()
+                    if body:
+                        lines.append(f"{role}: {body}")
+                return "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"Could not fetch conversation history: {e}")
+            return ""
+
     async def _draft_response(
         self, msg: Dict[str, Any], route: Dict[str, Any]
     ) -> str:
         """
         Generate a draft response in the agent's voice using OpenAI.
+        Includes recent conversation history so the agent doesn't repeat itself.
         """
         agent = route["agent"]
         contact = msg["contact_name"]
         body = msg["body"]
 
+        history = await self._fetch_conversation_history(msg.get("conversation_id", ""))
+
         system_prompt = self._get_agent_prompt(agent)
+
+        if history:
+            context_block = (
+                f"Here is the conversation so far:\n{history}\n\n"
+                f"The latest message from {contact} is:\n\"{body}\"\n\n"
+            )
+        else:
+            context_block = f"A new message came in from {contact} via {msg['msg_type']}:\n\n\"{body}\"\n\n"
+
         user_prompt = (
-            f"A message just came in from {contact} via {msg['msg_type']}:\n\n"
-            f"\"{body}\"\n\n"
-            f"Draft a concise, professional reply in your voice. "
+            f"{context_block}"
+            f"Draft a reply in your voice. "
+            f"Do NOT repeat any opener already used in this conversation. "
             f"Keep it under 160 characters if SMS, 300 if email. "
             f"Do not add a subject line. Do not sign off with your name. "
             f"Output ONLY the message text, nothing else."
@@ -350,23 +388,29 @@ class InboundRouter:
         """Return the persona system prompt for the drafting agent."""
         if "Dean" in agent:
             return (
-                "You are Dean, CMO of Grime Guardians. You handle sales, leads, and pricing. "
-                "Your tone is warm, confident, and value-focused. "
-                "Never apologize for pricing. Position us as a premium service. "
-                "Use Hormozi-style give-before-ask framing when appropriate."
+                "You are Dean, CMO of Grime Guardians — a premium Twin Cities cleaning company. "
+                "You handle sales, leads, and pricing. Your tone is warm, confident, and specific. "
+                "You know our pricing: deep cleans start at $299 (under 2k sqft), $399 (2-3.5k), $549 (3.5-5k). "
+                "Move-outs start at $549. Recurring plans from $299/visit. "
+                "Never apologize for pricing — position us as the premium option worth it. "
+                "Be conversational and specific to what the client just said. "
+                "Never start with 'Thank you for reaching out' if it was already used earlier in the conversation. "
+                "Lead with value or a direct answer, not a generic greeting."
             )
         elif "Emma" in agent:
             return (
                 "You are Emma, CXO of Grime Guardians. You handle client experience and complaints. "
                 "Your tone is empathetic, calm, and solution-focused. "
-                "Acknowledge the issue, take ownership, and offer a clear next step. "
-                "Never get defensive. Turn every complaint into a retention opportunity."
+                "Acknowledge the specific issue raised, take ownership, and offer a clear next step. "
+                "Never get defensive. Turn every complaint into a retention opportunity. "
+                "Be specific to what they said — no generic responses."
             )
         else:
             return (
-                "You are Ava, COO of Grime Guardians. You handle operations, scheduling, and logistics. "
+                "You are Ava, COO of Grime Guardians. You handle operations, scheduling, and cleaner logistics. "
                 "Your tone is direct, professional, and efficient. "
-                "Lead with the answer, keep it brief, and always give a clear next step."
+                "Lead with the answer, keep it brief, and always give a clear next step. "
+                "Be specific to what was asked — no filler phrases."
             )
 
     # ─── Discord Posting ──────────────────────────────────────────────────────
