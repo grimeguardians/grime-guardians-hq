@@ -91,13 +91,22 @@ class InboundRouter:
 
     async def handle(self, payload: Dict[str, Any]):
         """
-        Main entry point. Parse payload → classify → draft → post to Discord.
+        Main entry point. Parse payload → fetch missing data → classify → draft → post to Discord.
         """
         try:
             msg = self._parse_payload(payload)
             if not msg:
-                logger.warning(f"Could not parse webhook payload: {payload}")
-                return
+                # No body in payload — try fetching latest message from GHL via contact ID
+                contact_id = (
+                    payload.get("contactId") or
+                    payload.get("contact_id") or
+                    (payload.get("contact") or {}).get("id", "")
+                )
+                if contact_id:
+                    msg = await self._fetch_latest_message(contact_id, payload)
+                if not msg:
+                    logger.warning(f"Could not extract message from webhook payload: {list(payload.keys())}")
+                    return
 
             logger.info(f"Inbound from {msg['contact_name']} ({msg['msg_type']}): {msg['body'][:80]}")
 
@@ -107,6 +116,72 @@ class InboundRouter:
 
         except Exception as e:
             logger.error(f"InboundRouter.handle error: {e}", exc_info=True)
+
+    async def _fetch_latest_message(
+        self, contact_id: str, payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        When the webhook body contains no message text, fetch the latest
+        inbound message for this contact directly from GHL.
+        """
+        try:
+            async with GoHighLevelIntegration() as ghl:
+                # Search for the contact's conversation
+                resp = await ghl._request(
+                    "GET",
+                    "/conversations/search",
+                    params={"contactId": contact_id, "limit": 1},
+                )
+                conversations = resp.get("conversations", [])
+                if not conversations:
+                    logger.warning(f"No conversations found for contact {contact_id}")
+                    return None
+
+                conv = conversations[0]
+                conversation_id = conv.get("id", "")
+
+                # Fetch messages in that conversation
+                msgs_resp = await ghl._request(
+                    "GET",
+                    f"/conversations/{conversation_id}/messages",
+                    params={"limit": 5},
+                )
+                messages = msgs_resp.get("messages", {}).get("messages", [])
+
+                # Find the most recent inbound message
+                inbound = [
+                    m for m in messages
+                    if m.get("direction", "").lower() == "inbound"
+                ]
+                if not inbound:
+                    logger.warning(f"No inbound messages in conversation {conversation_id}")
+                    return None
+
+                latest = inbound[0]
+                body = (latest.get("body") or latest.get("text", "")).strip()
+                if not body:
+                    return None
+
+                # Build contact name from payload fields
+                contact_name = (
+                    f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip()
+                    or payload.get("phone", "")
+                    or "Unknown"
+                )
+
+                return {
+                    "contact_name": contact_name,
+                    "contact_phone": payload.get("phone", ""),
+                    "contact_email": payload.get("email", ""),
+                    "contact_id": contact_id,
+                    "conversation_id": conversation_id,
+                    "body": body,
+                    "msg_type": latest.get("type", "SMS").upper(),
+                    "received_at": datetime.now(),
+                }
+        except Exception as e:
+            logger.error(f"_fetch_latest_message error: {e}", exc_info=True)
+            return None
 
     # ─── Payload Parsing ──────────────────────────────────────────────────────
 
