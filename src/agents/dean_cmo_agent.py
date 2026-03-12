@@ -289,7 +289,7 @@ Moving out? I've got you covered! Our move-out cleaning ensures you get your ful
 
 **DEPOSIT GUARANTEE:** If you don't get your deposit back due to cleanliness issues we missed, we'll refund your service fee!
 
-**PRICING:** $200-$400 depending on property size
+**PRICING:** Elite Listing Polish from $549 | Deep Reset (oven+fridge included) from $849
 **TIMELINE:** Usually completed within 4-6 hours
 
 📅 **BOOK NOW:** We're typically booked 1-2 weeks out for move-outs, so schedule early!
@@ -321,7 +321,7 @@ Ready for that "wow" feeling? Our deep cleaning service transforms your space!
 **TIME INVESTMENT:** 6-8 hours for thorough deep clean
 **FREQUENCY:** Most clients do this 2-3 times per year
 
-**PRICING:** Starting at $180 for smaller homes
+**PRICING:** Elite Home Reset from $299 (under 2k sqft), $399 (2-3.5k), $549 (3.5-5k)
 
 Ready to transform your space? What size property are we working with?
 
@@ -382,7 +382,7 @@ I'd love to help you find exactly what you need! Quick questions to give you the
 
 💡 **THE MORE I KNOW, THE BETTER I CAN HELP!** Even if you only answer a few questions, I can provide a much more accurate quote and recommendation.
 
-**BONUS:** First-time customers get $25 off their first service!
+**NEXT STEP:** The more detail you give me, the more accurate the quote.
 
 Ready to get started?
 
@@ -405,12 +405,11 @@ Ready to get started?
 Since you're already getting regular cleaning, have you considered our premium add-ons?
 
 **POPULAR UPGRADES:**
-✅ **Inside Oven Cleaning** (+$25) - We'll make it sparkle!
-✅ **Refrigerator Deep Clean** (+$20) - Inside and out
-✅ **Window Interior Cleaning** (+$30) - Crystal clear views
-✅ **Garage Organization** (+$40) - Tidy up that space too
-
-**QUARTERLY DEEP CLEAN:** Many of our regular clients add a deep clean every 3 months to stay ahead of the game. Just +$60 to your regular service.
+✅ **Oven Interior** (+$100) - We'll make it sparkle!
+✅ **Fridge Interior** (+$100) - Inside and out
+✅ **Kitchen Perfection Bundle** (Fridge + Oven + Cabinets interior): $249 (save $51)
+✅ **Garage Sweep-Out** (+$100)
+✅ **Carpet Shampooing** (+$40/area) | **Window Tracks** (+$4/track)
 
 **BUNDLE DEAL:** Add any 2 services and save $15!
 
@@ -467,13 +466,13 @@ Great to hear from you! I'm here to help with all your cleaning service needs.
 💡 Cleaning tips and advice
 
 **WHY CHOOSE GRIME GUARDIANS:**
-✅ 4.9⭐ average rating with 200+ reviews
+✅ BBB-accredited with 70+ five-star Google reviews
 ✅ Fully bonded and insured
 ✅ Eco-friendly products
 ✅ 100% satisfaction guarantee
 ✅ Flexible scheduling (including weekends)
 
-**CURRENT SPECIAL:** New customers save $25 on their first service!
+**POSITIONING:** Premium service for clients who value time over money. BBB-accredited, 70+ five-star reviews.
 
 What specific cleaning needs can I help you with today? Whether it's a quick quote, service questions, or scheduling - I'm your guy!
 
