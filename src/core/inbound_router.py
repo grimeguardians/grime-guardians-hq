@@ -176,7 +176,7 @@ class InboundRouter:
                     "contact_id": contact_id,
                     "conversation_id": conversation_id,
                     "body": body,
-                    "msg_type": latest.get("type", "SMS").upper(),
+                    "msg_type": str(latest.get("type", "SMS")).upper(),
                     "received_at": datetime.now(),
                 }
         except Exception as e:
