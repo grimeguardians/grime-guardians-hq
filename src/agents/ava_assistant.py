@@ -394,39 +394,110 @@ class AvaAssistant:
         """Execute a tool call and return the result."""
         async with self.ghl as ghl:
 
-            if name == "search_appointments":
-                date_str = args.get("date", datetime.now().strftime("%Y-%m-%d"))
-                contacts = await ghl.search_contacts(query=args.get("query", ""))
-                return {"appointments": contacts, "date": date_str}
-
-            elif name == "get_contact_details":
-                contact_id = args.get("contact_id", "")
-                if contact_id:
-                    contact = await ghl.get_contact(contact_id)
-                    return {"contact": contact}
-                return {"error": "contact_id required"}
-
-            elif name == "find_appointment_by_contact":
-                name_query = args.get("name", "")
-                contacts = await ghl.search_contacts(query=name_query)
-                return {"results": contacts, "query": name_query}
+            if name == "get_todays_schedule":
+                appointments = await ghl.get_todays_schedule()
+                return {
+                    "date": datetime.now().strftime("%A, %B %d, %Y"),
+                    "count": len(appointments),
+                    "appointments": [self._fmt_appointment(a) for a in appointments],
+                }
 
             elif name == "get_weekly_schedule":
-                # Return appointments for the current week
-                contacts = await ghl.get_appointments(
+                appointments = await ghl.get_weeks_schedule()
+                return {
+                    "count": len(appointments),
+                    "appointments": [self._fmt_appointment(a) for a in appointments],
+                }
+
+            elif name == "search_appointments":
+                # Date-range query
+                appointments = await ghl.get_appointments(
                     start_date=args.get("start_date"),
                     end_date=args.get("end_date"),
                 )
-                return {"schedule": contacts}
+                return {
+                    "count": len(appointments),
+                    "appointments": [self._fmt_appointment(a) for a in appointments],
+                }
+
+            elif name == "get_contact_details":
+                contact_id = args.get("contact_id", "")
+                if not contact_id:
+                    return {"error": "contact_id required"}
+                contact = await ghl.get_contact(contact_id)
+                if contact:
+                    return {
+                        "id": contact.id,
+                        "name": contact.name,
+                        "email": contact.email,
+                        "phone": contact.phone,
+                        "tags": contact.tags,
+                    }
+                return {"error": f"No contact found for id {contact_id}"}
+
+            elif name == "search_contacts":
+                contacts = await ghl.search_contacts(
+                    query=args.get("query") or args.get("name"),
+                    phone=args.get("phone"),
+                    email=args.get("email"),
+                )
+                return {
+                    "count": len(contacts),
+                    "contacts": [
+                        {"id": c.id, "name": c.name, "email": c.email, "phone": c.phone}
+                        for c in contacts
+                    ],
+                }
+
+            elif name == "get_conversations":
+                conversations = await ghl.get_conversations(limit=args.get("limit", 20))
+                return {
+                    "count": len(conversations),
+                    "conversations": [
+                        {
+                            "id": c.id,
+                            "contact_name": c.contact_name,
+                            "type": c.type,
+                            "status": c.status,
+                            "last_message": c.last_message,
+                            "unread": c.unread_count,
+                        }
+                        for c in conversations
+                    ],
+                }
+
+            elif name == "get_conversation_messages":
+                conv_id = args.get("conversation_id", "")
+                if not conv_id:
+                    return {"error": "conversation_id required"}
+                messages = await ghl.get_conversation_messages(conv_id, limit=args.get("limit", 20))
+                return {"conversation_id": conv_id, "messages": messages}
 
             elif name == "update_knowledge":
-                # Log the knowledge update — no persistent storage needed
                 logger.info(f"Knowledge update from Ava: {args}")
                 return {"status": "noted", "update": args}
 
             else:
                 logger.warning(f"Unknown tool: {name}")
                 return {"error": f"Unknown tool: {name}"}
+
+    @staticmethod
+    def _fmt_appointment(apt) -> dict:
+        """Serialize a GHLAppointment to a clean dict for the AI context."""
+        return {
+            "id": apt.id,
+            "title": apt.title,
+            "client": apt.contact_name,
+            "phone": apt.contact_phone,
+            "email": apt.contact_email,
+            "address": apt.address,
+            "start": apt.start_time.strftime("%I:%M %p"),
+            "end": apt.end_time.strftime("%I:%M %p"),
+            "status": apt.status,
+            "service_type": apt.service_type,
+            "calendar": apt.calendar_name,
+            "notes": apt.notes,
+        }
 
 
 # Singleton

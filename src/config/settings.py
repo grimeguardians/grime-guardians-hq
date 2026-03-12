@@ -78,6 +78,7 @@ class Settings:
         self.highlevel_oauth_client_secret: str = os.getenv("HIGHLEVEL_OAUTH_CLIENT_SECRET", "")
         self.highlevel_oauth_access_token: str = os.getenv("HIGHLEVEL_OAUTH_ACCESS_TOKEN", "")
         self.highlevel_oauth_refresh_token: str = os.getenv("HIGHLEVEL_OAUTH_REFRESH_TOKEN", "")
+        self.highlevel_pit_token: str = os.getenv("HIGHLEVEL_PIT_TOKEN", "")
         self.disable_highlevel: bool = os.getenv("DISABLE_HIGHLEVEL", "false").lower() == "true"
         
         # Notion Integration - Using your existing credentials
@@ -480,3 +481,33 @@ QUALITY_REQUIREMENTS = {
 
 # Backward-compat alias (referenced by pricing_engine.py)
 CONTRACTOR_PAY_RATES: dict = {}  # No individual hourly rates — use CONTRACTOR_TEAMS + PAY_STRUCTURE
+
+# ─── GoHighLevel Calendar Configuration ──────────────────────────────────────
+# Three calendars in GHL, queried in priority order.
+# IDs sourced from the working agent-system project.
+# To override a calendar ID, set HIGHLEVEL_CALENDAR_ID_<KEY> in .env
+import os as _os
+
+GHL_CALENDARS = {
+    "cleaning_service": {
+        "id": _os.getenv("HIGHLEVEL_CALENDAR_ID_CLEANING", "sb6IQR2sx5JXOQqMgtf5"),
+        "name": "Cleaning service appointment",
+        "priority": 1,
+        "focus": "residential_commercial_cleaning",
+        "responsible_agent": "ava",
+    },
+    "walkthrough": {
+        "id": _os.getenv("HIGHLEVEL_CALENDAR_ID_WALKTHROUGH", "mhrQNqycH11jLZah5sJ6"),
+        "name": "Walkthrough appointment",
+        "priority": 2,
+        "focus": "lead_qualification",
+        "responsible_agent": "sophia",
+    },
+    "commercial_walkthrough": {
+        "id": _os.getenv("HIGHLEVEL_CALENDAR_ID_COMMERCIAL", "qXm41YUW2Cxc0stYERn8"),
+        "name": "Commercial Cleaning Walkthrough",
+        "priority": 3,
+        "focus": "commercial_lead_generation",
+        "responsible_agent": "dean",
+    },
+}
