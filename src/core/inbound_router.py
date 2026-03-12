@@ -23,36 +23,32 @@ settings = get_settings()
 # Maps message category keywords → agent persona + Discord channel key
 
 ROUTE_MAP = {
-    # New leads, pricing questions, quotes
+    # New leads, pricing questions, quotes → #sales-comms (Dean's lane)
     "lead": {
         "agent": "Dean (CMO)",
         "emoji": "🎯",
-        "channel": "general",
-        "alert_channel": "general",
+        "channel_id": 1481528969055440940,  # #sales-comms
         "color": discord.Color.blue(),
     },
-    # Existing client ops, scheduling, check-ins
+    # Existing client ops, scheduling, check-ins → #ops-comms (Ava's lane)
     "ops": {
         "agent": "Ava (COO)",
         "emoji": "📋",
-        "channel": "general",
-        "alert_channel": "general",
+        "channel_id": 1481493060667052062,  # #ops-comms
         "color": discord.Color.green(),
     },
-    # Complaints, dissatisfied clients, escalations
+    # Complaints, dissatisfied clients, escalations → #🚨-alerts
     "complaint": {
         "agent": "Emma (CXO)",
         "emoji": "🚨",
-        "channel": "alerts",
-        "alert_channel": "alerts",
+        "channel_id": None,  # falls back to ops-comms until #alerts ID is confirmed
         "color": discord.Color.red(),
     },
-    # Cleaner messages, contractor comms
+    # Cleaner messages, contractor comms → #ops-comms (Ava's lane)
     "cleaner": {
         "agent": "Ava (COO)",
         "emoji": "🧹",
-        "channel": "checkins",
-        "alert_channel": "general",
+        "channel_id": 1481493060667052062,  # #ops-comms
         "color": discord.Color.orange(),
     },
 }
@@ -487,10 +483,14 @@ SALES RULES:
         from .approval_view import ApprovalView
 
         bot: GrimeGuardiansBot = self.bot
-        channel = bot.get_channel(1481493060667052062)  # #ops-comms
+        channel_id = route.get("channel_id") or 1481493060667052062  # fallback: #ops-comms
+        channel = bot.get_channel(channel_id)
 
         if not channel:
-            logger.error("Could not find #ops-comms channel (ID 1481493060667052062).")
+            logger.error(f"Could not find channel ID {channel_id} — falling back to #ops-comms.")
+            channel = bot.get_channel(1481493060667052062)
+        if not channel:
+            logger.error("Could not find #ops-comms fallback channel either.")
             return
 
         agent = route["agent"]
