@@ -123,16 +123,26 @@ class InboundRouter:
         """
         When the webhook body contains no message text, fetch the latest
         inbound message for this contact directly from GHL.
+        GHL fires the webhook before the conversation is fully created,
+        so retry a few times with a short delay.
         """
+        import asyncio
         try:
             async with GoHighLevelIntegration() as ghl:
-                # Search for the contact's conversation
-                resp = await ghl._request(
-                    "GET",
-                    "/conversations/search",
-                    params={"contactId": contact_id, "limit": 1},
-                )
-                conversations = resp.get("conversations", [])
+                conversations = []
+                for attempt in range(4):  # try up to 4x over ~6 seconds
+                    if attempt > 0:
+                        await asyncio.sleep(2)
+                    resp = await ghl._request(
+                        "GET",
+                        "/conversations/search",
+                        params={"contactId": contact_id, "limit": 1},
+                    )
+                    conversations = resp.get("conversations", [])
+                    if conversations:
+                        break
+                    logger.info(f"Conversation not ready yet for {contact_id}, retrying... (attempt {attempt + 1})")
+
                 if not conversations:
                     logger.warning(f"No conversations found for contact {contact_id}")
                     return None
