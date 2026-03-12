@@ -607,12 +607,12 @@ class GoHighLevelIntegration:
         contact_id: str = "",
     ) -> bool:
         """Send a message in a GHL conversation (SMS, Email, etc.)."""
-        # GHL v2 uses numeric type: 1=SMS, 3=Email
-        type_map = {"SMS": 1, "EMAIL": 3, "EMAIL_REPLY": 3}
-        msg_type_int = type_map.get(message_type.upper(), 1)
+        # GHL v2 send endpoint expects string enum: "SMS", "Email", "WhatsApp", etc.
+        type_map = {"SMS": "SMS", "EMAIL": "Email", "EMAIL_REPLY": "Email", "2": "SMS", "1": "SMS"}
+        msg_type_str = type_map.get(message_type.upper(), "SMS")
 
         body: Dict[str, Any] = {
-            "type": msg_type_int,
+            "type": msg_type_str,
             "message": message,
             "conversationId": conversation_id,
         }
