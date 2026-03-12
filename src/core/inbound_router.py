@@ -311,8 +311,8 @@ class InboundRouter:
 
     # ─── Draft Generation ─────────────────────────────────────────────────────
 
-    async def _fetch_conversation_history(self, conversation_id: str) -> str:
-        """Fetch last few messages from GHL to give the agent context."""
+    async def _fetch_conversation_history(self, conversation_id: str, limit: int = 20) -> str:
+        """Fetch recent messages from GHL to give the agent full conversation context."""
         if not conversation_id:
             return ""
         try:
@@ -320,7 +320,7 @@ class InboundRouter:
                 resp = await ghl._request(
                     "GET",
                     f"/conversations/{conversation_id}/messages",
-                    params={"limit": 6},
+                    params={"limit": limit},
                 )
                 messages = resp.get("messages", {}).get("messages", [])
                 if not messages:
@@ -348,7 +348,7 @@ class InboundRouter:
         contact = msg["contact_name"]
         body = msg["body"]
 
-        history = await self._fetch_conversation_history(msg.get("conversation_id", ""))
+        history = await self._fetch_conversation_history(msg.get("conversation_id", ""), limit=20)
 
         system_prompt = self._get_agent_prompt(agent)
 
@@ -389,12 +389,20 @@ class InboundRouter:
         if "Dean" in agent:
             return (
                 "You are Dean, CMO of Grime Guardians — a premium Twin Cities cleaning company. "
-                "You handle sales, leads, and pricing. Your tone is warm, confident, and specific. "
-                "You know our pricing: deep cleans start at $299 (under 2k sqft), $399 (2-3.5k), $549 (3.5-5k). "
-                "Move-outs start at $549. Recurring plans from $299/visit. "
-                "Never apologize for pricing — position us as the premium option worth it. "
+                "You handle sales, leads, and pricing. Your tone is warm, confident, and specific.\n\n"
+                "PRICING (all pre-tax, apply 8.125% at invoice):\n"
+                "• Elite Home Reset (initial deep clean): <2k sqft=$299, 2-3.5k=$399, 3.5-5k=$549\n"
+                "• Move-Out — Elite Listing Polish: Studio/1bed=$549, 2-3bed=$749, 4+bed=$999+\n"
+                "• Move-Out — Deep Reset (oven+fridge included): Studio/1bed=$849, 2-3bed=$1,149, 4+bed=$1,499+\n"
+                "• Recurring — Essentials: <2k=$299, 2-3.5k=$399, 3.5-5k=$499\n"
+                "• Recurring — Prestige: <2k=$449, 2-3.5k=$549, 3.5-5k=$649\n"
+                "• Recurring — VIP Elite: <2k=$799, 2-3.5k=$899, 3.5-5k=$999\n"
+                "• Add-ons: Kitchen bundle (fridge+oven+cabinets)=$249, Oven=$100, Fridge=$100\n"
+                "• Modifiers: Pet homes +10%, heavy buildup +20%\n\n"
+                "Always quote the correct tier based on home size and service type mentioned. "
+                "Never apologize for pricing — position us as the premium option worth every dollar. "
                 "Be conversational and specific to what the client just said. "
-                "Never start with 'Thank you for reaching out' if it was already used earlier in the conversation. "
+                "Never reuse an opener already used earlier in this conversation. "
                 "Lead with value or a direct answer, not a generic greeting."
             )
         elif "Emma" in agent:
