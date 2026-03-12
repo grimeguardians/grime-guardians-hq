@@ -41,7 +41,7 @@ ROUTE_MAP = {
     "complaint": {
         "agent": "Emma (CXO)",
         "emoji": "🚨",
-        "channel_id": None,  # falls back to ops-comms until #alerts ID is confirmed
+        "channel_id": 1377516295754350613,  # #🚨-alerts
         "color": discord.Color.red(),
     },
     # Cleaner messages, contractor comms → #ops-comms (Ava's lane)
@@ -81,8 +81,11 @@ class InboundRouter:
     a drafted response to Discord for approval.
     """
 
-    def __init__(self, bot: discord.ext.commands.Bot):
-        self.bot = bot
+    def __init__(self, ava_bot: discord.ext.commands.Bot, dean_bot=None):
+        self.ava_bot = ava_bot
+        self.dean_bot = dean_bot
+        # Legacy alias so nothing else breaks
+        self.bot = ava_bot
         self.openai = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
     async def handle(self, payload: Dict[str, Any]):
@@ -482,13 +485,16 @@ SALES RULES:
         from ..integrations.discord_integration import GrimeGuardiansBot
         from .approval_view import ApprovalView
 
-        bot: GrimeGuardiansBot = self.bot
         channel_id = route.get("channel_id") or 1481493060667052062  # fallback: #ops-comms
-        channel = bot.get_channel(channel_id)
+        is_sales_channel = channel_id == 1481528969055440940
 
+        # Use Dean's bot for #sales-comms if available, otherwise fall back to Ava
+        active_bot = (self.dean_bot if self.dean_bot and is_sales_channel else self.ava_bot)
+
+        channel = active_bot.get_channel(channel_id)
         if not channel:
-            logger.error(f"Could not find channel ID {channel_id} — falling back to #ops-comms.")
-            channel = bot.get_channel(1481493060667052062)
+            logger.error(f"Could not find channel ID {channel_id} — falling back to #ops-comms via Ava.")
+            channel = self.ava_bot.get_channel(1481493060667052062)
         if not channel:
             logger.error("Could not find #ops-comms fallback channel either.")
             return

@@ -17,6 +17,7 @@ import uvicorn
 
 from src.config.settings import get_settings
 from src.integrations.discord_integration import GrimeGuardiansBot
+from src.integrations.dean_bot import DeanBot
 from src.api.webhook_server import app as webhook_app, set_router
 from src.core.inbound_router import InboundRouter
 
@@ -57,21 +58,32 @@ async def main():
 
     logger.info(f"Starting Grime Guardians | model: {settings.openai_model} | env: {settings.environment}")
 
-    # Create bot and wire the inbound router before starting
-    # (channels populate on on_ready; router posts after that point)
-    bot = GrimeGuardiansBot()
-    router = InboundRouter(bot=bot)
+    # Ava — COO bot (ops-comms, slash commands, GHL tools)
+    ava_bot = GrimeGuardiansBot()
+
+    # Dean — CMO bot (sales-comms), optional if token not set
+    dean_bot = DeanBot() if settings.discord_dean_bot_token else None
+    if not dean_bot:
+        logger.warning("DISCORD_DEAN_BOT_TOKEN not set — Dean bot will not start. Sales posts will use Ava.")
+
+    router = InboundRouter(ava_bot=ava_bot, dean_bot=dean_bot)
     set_router(router)
-    logger.info("Inbound router wired to bot.")
+    logger.info(f"Inbound router wired. Ava: ✅  Dean: {'✅' if dean_bot else '⚠️ offline'}")
+
+    tasks = [
+        ava_bot.start(settings.discord_bot_token),
+        run_webhook_server(port=8000),
+    ]
+    if dean_bot:
+        tasks.append(dean_bot.start(settings.discord_dean_bot_token))
 
     try:
-        await asyncio.gather(
-            bot.start(settings.discord_bot_token),
-            run_webhook_server(port=8000),
-        )
+        await asyncio.gather(*tasks)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-        await bot.close()
+        await ava_bot.close()
+        if dean_bot:
+            await dean_bot.close()
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)

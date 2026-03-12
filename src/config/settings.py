@@ -51,9 +51,10 @@ class Settings:
         self.target_classification_accuracy: float = float(os.getenv("TARGET_CLASSIFICATION_ACCURACY", "0.90"))
         self.classification_confidence_threshold: float = float(os.getenv("CLASSIFICATION_CONFIDENCE_THRESHOLD", "0.80"))
         
-        # Discord Integration - Using your existing token
+        # Discord Integration
         self.discord_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
         self.discord_bot_token: str = self.discord_token  # Alias for compatibility
+        self.discord_dean_bot_token: str = os.getenv("DISCORD_DEAN_BOT_TOKEN", "")
         self.discord_guild_id: Optional[str] = os.getenv("DISCORD_GUILD_ID")
         self.discord_client_id: Optional[str] = os.getenv("DISCORD_CLIENT_ID")
         
