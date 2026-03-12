@@ -606,10 +606,18 @@ class GoHighLevelIntegration:
         message_type: str = "SMS",
     ) -> bool:
         """Send a message in a GHL conversation (SMS, Email, etc.)."""
+        # GHL v2 uses numeric type: 1=SMS, 3=Email
+        type_map = {"SMS": 1, "EMAIL": 3, "EMAIL_REPLY": 3}
+        msg_type_int = type_map.get(message_type.upper(), 1)
+
         resp = await self._request(
             "POST",
-            f"/conversations/{conversation_id}/messages",
-            data={"type": message_type, "message": message},
+            "/conversations/messages",
+            data={
+                "type": msg_type_int,
+                "message": message,
+                "conversationId": conversation_id,
+            },
         )
         if "error" in resp:
             logger.error(f"Send message failed for {conversation_id}: {resp['error']}")

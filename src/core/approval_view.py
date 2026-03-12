@@ -163,7 +163,7 @@ class ApprovalView(discord.ui.View):
         modal = AmendModal(view=self)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="❌ Deny", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="❌ Deny", style=discord.ButtonStyle.secondary)
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Cancel the draft and mark the embed as denied."""
         await interaction.response.defer()
