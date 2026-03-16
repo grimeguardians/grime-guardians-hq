@@ -20,6 +20,7 @@ from src.integrations.discord_integration import GrimeGuardiansBot
 from src.integrations.dean_bot import DeanBot
 from src.api.webhook_server import app as webhook_app, set_router
 from src.core.inbound_router import InboundRouter
+from src.core.email_cron import run_email_cron
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,12 +71,18 @@ async def main():
     set_router(router)
     logger.info(f"Inbound router wired. Ava: ✅  Dean: {'✅' if dean_bot else '⚠️ offline'}")
 
+    # Email cron — only starts if at least one Gmail account is configured
+    email_enabled = bool(settings.gmail_account_1_email and settings.gmail_account_1_refresh_token)
+    logger.info(f"Email cron: {'✅ enabled' if email_enabled else '⚠️ disabled (no GMAIL_ACCOUNT_1 configured)'}")
+
     tasks = [
         ava_bot.start(settings.discord_bot_token),
         run_webhook_server(port=8000),
     ]
     if dean_bot:
         tasks.append(dean_bot.start(settings.discord_dean_bot_token))
+    if email_enabled:
+        tasks.append(run_email_cron())
 
     try:
         await asyncio.gather(*tasks)

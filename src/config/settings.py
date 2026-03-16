@@ -55,6 +55,20 @@ class Settings:
         self.discord_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
         self.discord_bot_token: str = self.discord_token  # Alias for compatibility
         self.discord_dean_bot_token: str = os.getenv("DISCORD_DEAN_BOT_TOKEN", "")
+
+        # OpenAI Assistant IDs
+        self.dean_assistant_id: str = os.getenv("DEAN_ASSISTANT_ID", "")
+
+        # Gmail multi-account outreach (shared OAuth client, separate refresh tokens)
+        # Get refresh tokens via: python src/tools/gmail_oauth_setup.py
+        self.gmail_account_1_email: str = os.getenv("GMAIL_ACCOUNT_1_EMAIL", "")
+        self.gmail_account_1_refresh_token: str = os.getenv("GMAIL_ACCOUNT_1_REFRESH_TOKEN", "")
+        self.gmail_account_2_email: str = os.getenv("GMAIL_ACCOUNT_2_EMAIL", "")
+        self.gmail_account_2_refresh_token: str = os.getenv("GMAIL_ACCOUNT_2_REFRESH_TOKEN", "")
+        # Max emails per account per day (ramp: 20 → 40 → 60 over first 3 weeks)
+        self.email_daily_limit_per_account: int = int(os.getenv("EMAIL_DAILY_LIMIT", "20"))
+        # GHL tag to pull outreach contacts from
+        self.email_outreach_tag: str = os.getenv("EMAIL_OUTREACH_TAG", "email-outreach")
         self.discord_guild_id: Optional[str] = os.getenv("DISCORD_GUILD_ID")
         self.discord_client_id: Optional[str] = os.getenv("DISCORD_CLIENT_ID")
         
