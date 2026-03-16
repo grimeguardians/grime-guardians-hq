@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from ..config.settings import get_settings
 from ..models.schemas import JobSchema, ContractorSchema
+from ..utils.time_utils import now_ct
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -241,7 +242,7 @@ class DiscordToolkit:
             "issue": "🔴"
         }.get(status, "⚪")
         
-        timestamp = datetime.now().strftime("%I:%M %p")
+        timestamp = now_ct().strftime("%I:%M %p")
         
         content = f"""{status_emoji} **{status.upper()}** - {contractor_name}
 
@@ -379,7 +380,7 @@ class DiscordToolkit:
     ) -> Dict[str, Any]:
         """Send job completion photos to photo submissions channel."""
         
-        content = f"📸 **{photo_type.title()} Photos** - {contractor_name}\n**Job:** {job_id}\n**Submitted:** {datetime.now().strftime('%I:%M %p')}"
+        content = f"📸 **{photo_type.title()} Photos** - {contractor_name}\n**Job:** {job_id}\n**Submitted:** {now_ct().strftime('%I:%M %p')}"
         
         return await self.send_message(
             DiscordChannelType.PHOTO_SUBMISSIONS.value,

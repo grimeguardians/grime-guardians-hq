@@ -23,6 +23,7 @@ from ..config.settings import get_settings
 from ..integrations.gmail_sender import GmailSender
 from ..integrations.gmail_reader import GmailReader
 from ..integrations.google_sheets import GoogleSheetsClient, SheetContact
+from ..utils.time_utils import now_ct
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -63,55 +64,55 @@ TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
     "property_manager": {
         "A": {
             "subject": "backup vendor{for_company}",
-            "body": "Hey {first_name}, would you be opposed to having a backup cleaning vendor on standby for the next time your main crew no-shows{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, would you be opposed to having a backup cleaning vendor on standby for the next time your main crew no-shows{at_company}?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "quick question",
-            "body": "Hey {first_name}, are you currently looking to eliminate move-in touch-ups{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you currently looking to eliminate move-in touch-ups{at_company}?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
     "construction": {
         "A": {
             "subject": "final inspections",
-            "body": "Hey {first_name}, would you be against having a backup cleaning crew on standby for the next time your main team holds up a final inspection?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, would you be against having a backup cleaning crew on standby for the next time your main team holds up a final inspection?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "walkthroughs{at_company}",
-            "body": "Hey {first_name}, are you currently looking to eliminate final walkthrough dust complaints{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you currently looking to eliminate final walkthrough dust complaints{at_company}?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
     "realtor": {
         "A": {
             "subject": "picture day",
-            "body": "Hey {first_name}, would you be opposed to having a backup cleaning crew on standby the next time a listing isn't photo-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, would you be opposed to having a backup cleaning crew on standby the next time a listing isn't photo-ready?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "new listings",
-            "body": "Hey {first_name}, are you currently looking to get your new listings photo-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you currently looking to get your new listings photo-ready?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
     "real_estate_developer": {
         "A": {
             "subject": "delayed flips",
-            "body": "Hey {first_name}, would you be opposed to having a backup turnover crew on standby for the next time your main guys delay a flip hitting the market?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, would you be opposed to having a backup turnover crew on standby for the next time your main guys delay a flip hitting the market?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "market-ready",
-            "body": "Hey {first_name}, are you currently looking to get your latest flip market-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you currently looking to get your latest flip market-ready?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
     "general": {
         "A": {
             "subject": "quick question",
-            "body": "Hey {first_name}, would you be opposed to having a reliable backup cleaning crew on standby in the Twin Cities?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, would you be opposed to having a reliable backup cleaning crew on standby in the Twin Cities?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "twin cities cleaning",
-            "body": "Hey {first_name}, are you currently looking for a reliable cleaning crew in the Twin Cities?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you currently looking for a reliable cleaning crew in the Twin Cities?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
@@ -121,11 +122,11 @@ TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
     "followup_2": {
         "A": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, just floating this back to the top.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, just floating this back to the top.\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, wanted to make sure this didn't get buried.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, wanted to make sure this didn't get buried.\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
@@ -135,11 +136,11 @@ TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
     "followup_3": {
         "A": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, I'll assume the timing isn't right and take you off my list. If you ever need a reliable crew on short notice, we're here.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, I'll assume the timing isn't right and take you off my list. If you ever need a reliable crew on short notice, we're here.\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, no worries — I won't keep bugging you. If {avatar_pain} ever becomes a problem worth solving, feel free to reach back out.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, no worries — I won't keep bugging you. If {avatar_pain} ever becomes a problem worth solving, feel free to reach back out.\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 
@@ -149,11 +150,11 @@ TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
     "drip": {
         "A": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, quick update — we've been handling {avatar_pain} for a few clients in the area. If that's ever on your radar, I'd be happy to put together something fast.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, quick update — we've been handling {avatar_pain} for a few clients in the area. If that's ever on your radar, I'd be happy to put together something fast.\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
         "B": {
             "subject": "re: {original_subject}",
-            "body": "Hey {first_name}, are you still dealing with {avatar_pain}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+            "body": "Hey {first_name}, are you still dealing with {avatar_pain}?\n\n- Brandon\nTo opt out, reply \"unsubscribe\"",
         },
     },
 }
@@ -181,7 +182,7 @@ def _pick_template_and_step(contact: SheetContact) -> Optional[Tuple[str, str, i
 
     Returns (template_group, variant, step) or None if nothing to send.
     """
-    now = datetime.now()
+    now = now_ct()
     variant = _ab_variant(contact)
     status = contact.status.lower()
 
@@ -233,7 +234,7 @@ def _should_recycle(contact: SheetContact) -> bool:
         return False
     try:
         day1_sent = datetime.fromisoformat(contact.email_1_date)
-        return (datetime.now() - day1_sent).days >= RECYCLE_DAYS
+        return (now_ct().replace(tzinfo=None) - day1_sent).days >= RECYCLE_DAYS
     except ValueError:
         return False
 
@@ -426,11 +427,12 @@ class DeanEmailCampaign:
                 ok = await sender.send(session, to=contact.email, subject=subject, body=body)
 
                 if ok:
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    now_str = now_ct().strftime("%Y-%m-%d %H:%M")
                     if step == 1:
                         contact.email_1_date = now_str
                         contact.email_1_template = f"{template_group}_{variant}"
                         contact.status = "contacted"
+                        contact.sender_account = sender.email
                     elif step == 2:
                         contact.email_2_date = now_str
                     elif step == 3:

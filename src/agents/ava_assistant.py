@@ -14,6 +14,7 @@ import openai
 
 from ..config.settings import get_settings
 from ..integrations.gohighlevel_integration import GoHighLevelIntegration
+from ..utils.time_utils import now_ct
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -319,7 +320,7 @@ class AvaAssistant:
             )
 
             # Inject current date so the model can resolve "today", "this friday", etc.
-            now = datetime.now()
+            now = now_ct()
             date_context = (
                 f"Current date and time: {now.strftime('%A, %B %d, %Y at %I:%M %p')} Central Time. "
                 f"Use this as the reference for all date-related questions."
@@ -416,7 +417,7 @@ class AvaAssistant:
             if name == "get_todays_schedule":
                 appointments = await ghl.get_todays_schedule()
                 return {
-                    "date": datetime.now().strftime("%A, %B %d, %Y"),
+                    "date": now_ct().strftime("%A, %B %d, %Y"),
                     "count": len(appointments),
                     "appointments": [self._fmt_appointment(a) for a in appointments],
                 }

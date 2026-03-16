@@ -55,8 +55,9 @@ COL = {
     "reply_date": 14,
     "reply_sentiment": 15,
     "notes": 16,
+    "sender_account": 17,   # which Gmail account sent the initial email
 }
-TOTAL_COLS = 17
+TOTAL_COLS = 18
 
 
 @dataclass
@@ -77,6 +78,7 @@ class SheetContact:
     reply_date: str = ""
     reply_sentiment: str = ""
     notes: str = ""
+    sender_account: str = ""  # e.g. "brandonr@grimeguardians.com"
 
 
 def _derive_contact_type(industry: str) -> str:
@@ -132,7 +134,7 @@ class GoogleSheetsClient:
         Skips header row, skips rows with no email, skips status=skip.
         Returns SheetContact list ready for DeanEmailCampaign.
         """
-        url = f"{BASE_URL}/{SPREADSHEET_ID}/values/{TAB}!A1:Q"
+        url = f"{BASE_URL}/{SPREADSHEET_ID}/values/{TAB}!A1:R"
         result = self._request("GET", url)
         rows = result.get("values", [])
 
@@ -167,6 +169,7 @@ class GoogleSheetsClient:
                 reply_date=row[COL["reply_date"]].strip(),
                 reply_sentiment=row[COL["reply_sentiment"]].strip(),
                 notes=row[COL["notes"]].strip(),
+                sender_account=row[COL["sender_account"]].strip() if len(row) > COL["sender_account"] else "",
             ))
 
         logger.info(f"Sheets: read {len(contacts)} active contacts.")
@@ -174,7 +177,7 @@ class GoogleSheetsClient:
 
     def update_contact(self, contact: SheetContact) -> None:
         """Write tracking columns back to the sheet for a single contact."""
-        range_notation = f"{TAB}!J{contact.row_index}:Q{contact.row_index}"
+        range_notation = f"{TAB}!J{contact.row_index}:R{contact.row_index}"
         url = (
             f"{BASE_URL}/{SPREADSHEET_ID}/values/{range_notation}"
             f"?valueInputOption=RAW"
@@ -188,6 +191,7 @@ class GoogleSheetsClient:
             contact.reply_date,
             contact.reply_sentiment,
             contact.notes,
+            contact.sender_account,
         ]]
         self._request("PUT", url, body={"values": values})
         logger.debug(f"Sheets: updated row {contact.row_index} ({contact.email})")

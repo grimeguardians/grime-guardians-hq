@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
 from ..config.settings import get_settings
+from ..utils.time_utils import now_ct
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -150,7 +151,7 @@ class AvaOperationsMonitor:
             logger.warning(f"Arrival ping for unknown job: {job_id}")
             return None
 
-        now = arrival_time or datetime.now()
+        now = arrival_time or now_ct()
         job.arrived_at = now
         job.status = "arrived"
 
@@ -196,7 +197,7 @@ class AvaOperationsMonitor:
             logger.warning(f"Finish ping for unknown job: {job_id}")
             return []
 
-        now = finish_time or datetime.now()
+        now = finish_time or now_ct()
         job.finished_at = now
         job.status = "finished"
         job.photos_submitted = photos_submitted
@@ -244,7 +245,7 @@ class AvaOperationsMonitor:
         Returns:
             List of CheckInAlerts for jobs with no arrival ping.
         """
-        now = datetime.now()
+        now = now_ct()
         alerts = []
 
         for job_id, job in self.active_jobs.items():
@@ -291,7 +292,7 @@ class AvaOperationsMonitor:
             KPISnapshot with targets delta.
         """
         snapshot = KPISnapshot(
-            timestamp=datetime.now(),
+            timestamp=now_ct(),
             daily_revenue=raw_metrics.get("daily_revenue", 0.0),
             weekly_revenue=raw_metrics.get("weekly_revenue", 0.0),
             monthly_revenue=raw_metrics.get("monthly_revenue", 0.0),
