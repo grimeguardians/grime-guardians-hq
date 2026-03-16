@@ -21,6 +21,7 @@ import aiohttp
 
 from ..config.settings import get_settings
 from ..integrations.gmail_sender import GmailSender
+from ..integrations.gmail_reader import GmailReader
 from ..integrations.google_sheets import GoogleSheetsClient, SheetContact
 
 logger = logging.getLogger(__name__)
@@ -295,6 +296,76 @@ class DeanEmailCampaign:
                 refresh_token=settings.gmail_account_2_refresh_token,
             ))
         self.daily_limit = settings.email_daily_limit_per_account
+
+        # Readers mirror accounts 1:1 — same credentials, read-only scope used
+        self.readers: List[GmailReader] = []
+        if settings.gmail_account_1_email and settings.gmail_account_1_refresh_token:
+            self.readers.append(GmailReader(
+                email=settings.gmail_account_1_email,
+                refresh_token=settings.gmail_account_1_refresh_token,
+            ))
+        if settings.gmail_account_2_email and settings.gmail_account_2_refresh_token:
+            self.readers.append(GmailReader(
+                email=settings.gmail_account_2_email,
+                refresh_token=settings.gmail_account_2_refresh_token,
+            ))
+
+    async def scan_replies(self) -> Dict[str, int]:
+        """
+        Scan both Gmail inboxes for replies from known leads.
+        Updates reply_date + reply_sentiment in the sheet for any matches.
+        Returns {"found": N, "positive": N, "negative": N, "neutral": N}.
+
+        Designed to run before run_batch() so overnight replies suppress
+        that day's follow-up before it fires.
+        """
+        if not self.readers:
+            return {"found": 0, "positive": 0, "negative": 0, "neutral": 0}
+
+        contacts = self.sheets.read_contacts()
+        # Only contacts we've emailed and haven't logged a reply for yet
+        pending: Dict[str, SheetContact] = {
+            c.email: c
+            for c in contacts
+            if c.email_1_date and not c.reply_date
+        }
+
+        if not pending:
+            logger.debug("Reply scan: no pending contacts to check.")
+            return {"found": 0, "positive": 0, "negative": 0, "neutral": 0}
+
+        lead_emails = set(pending.keys())
+        stats = {"found": 0, "positive": 0, "negative": 0, "neutral": 0}
+
+        async with aiohttp.ClientSession() as session:
+            for reader in self.readers:
+                replies = await reader.scan_for_replies(session, lead_emails)
+                for reply in replies:
+                    contact = pending.get(reply.contact_email)
+                    if not contact:
+                        continue
+
+                    contact.reply_date = reply.received_at.strftime("%Y-%m-%d %H:%M")
+                    contact.reply_sentiment = reply.sentiment
+                    if reply.sentiment in ("positive", "negative"):
+                        contact.status = "replied"
+
+                    try:
+                        self.sheets.update_contact(contact)
+                        stats["found"] += 1
+                        stats[reply.sentiment] += 1
+                        logger.info(
+                            f"Reply logged: {contact.email} → {reply.sentiment} "
+                            f"(via {reply.sender_account})"
+                        )
+                    except Exception as e:
+                        logger.error(f"Sheet reply write-back failed for {contact.email}: {e}")
+
+                    # Remove from pending so a second reader doesn't double-log
+                    pending.pop(reply.contact_email, None)
+                    lead_emails.discard(reply.contact_email)
+
+        return stats
 
     async def run_batch(self) -> Dict[str, int]:
         """
