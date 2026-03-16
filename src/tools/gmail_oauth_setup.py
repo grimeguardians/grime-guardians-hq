@@ -1,25 +1,26 @@
 """
 Gmail OAuth Setup — run this ONCE per Gmail account to get a refresh token.
-The refresh token never expires (unless revoked), so you only need to do this once.
+Uses a localhost redirect (replaces deprecated OOB flow).
 
 Usage:
-    python src/tools/gmail_oauth_setup.py
+    python3 src/tools/gmail_oauth_setup.py
 
 Requirements:
     - GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must be in .env
-    - You'll be prompted to open a URL and paste back the auth code
+    - http://localhost:8080 must be in your OAuth client's authorized redirect URIs
+      (Google Cloud Console → APIs & Services → Credentials → your OAuth client)
 
-After running for both accounts, add to .env:
-    GMAIL_ACCOUNT_1_EMAIL=you@gmail.com
-    GMAIL_ACCOUNT_1_REFRESH_TOKEN=<printed below>
-    GMAIL_ACCOUNT_2_EMAIL=other@gmail.com
-    GMAIL_ACCOUNT_2_REFRESH_TOKEN=<printed below>
+After running for both accounts, update on server:
+    GMAIL_ACCOUNT_1_REFRESH_TOKEN=<token for brandonr@grimeguardians.com>
+    GMAIL_ACCOUNT_2_REFRESH_TOKEN=<token for grimeguardianscleaning@gmail.com>
 """
 
+import json
 import sys
 import urllib.parse
 import urllib.request
-import json
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -35,7 +36,37 @@ SCOPES = " ".join([
 ])
 AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # Desktop/manual flow
+REDIRECT_URI = "http://localhost:8080"
+
+# Shared storage for the auth code caught by the local server
+_auth_code: dict = {}
+
+
+class _CallbackHandler(BaseHTTPRequestHandler):
+    """Catches the OAuth redirect and extracts the auth code."""
+
+    def do_GET(self):
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if "code" in params:
+            _auth_code["value"] = params["code"][0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"""
+                <html><body style="font-family:sans-serif;padding:40px">
+                <h2>&#10003; Authorization successful!</h2>
+                <p>You can close this tab and return to the terminal.</p>
+                </body></html>
+            """)
+        else:
+            error = params.get("error", ["unknown"])[0]
+            self.send_response(400)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(f"<html><body>Error: {error}</body></html>".encode())
+
+    def log_message(self, format, *args):
+        pass  # suppress server request logs
 
 
 def get_refresh_token():
@@ -52,18 +83,28 @@ def get_refresh_token():
         "response_type": "code",
         "scope": SCOPES,
         "access_type": "offline",
-        "prompt": "consent",  # Forces refresh_token even if previously granted
+        "prompt": "consent",
     }
     url = AUTH_URL + "?" + urllib.parse.urlencode(params)
 
     print("\n" + "=" * 60)
-    print("Step 1: Open this URL in a browser and sign in with the Gmail account you want to authorize:")
-    print(f"\n{url}\n")
-    print("Step 2: After granting access, Google will show you an authorization code.")
-    print("=" * 60)
+    print("Opening browser for Google sign-in...")
+    print("Sign in with the Gmail account you want to authorize.")
+    print("=" * 60 + "\n")
 
-    code = input("\nPaste the authorization code here: ").strip()
+    webbrowser.open(url)
 
+    # Start local server and wait for the redirect
+    server = HTTPServer(("localhost", 8080), _CallbackHandler)
+    print("Waiting for Google to redirect back... (do not close this terminal)\n")
+    server.handle_request()  # handles exactly one request then stops
+
+    code = _auth_code.get("value")
+    if not code:
+        print("❌ No authorization code received.")
+        sys.exit(1)
+
+    # Exchange auth code for tokens
     data = urllib.parse.urlencode({
         "code": code,
         "client_id": client_id,
@@ -84,15 +125,14 @@ def get_refresh_token():
 
     refresh_token = token_data.get("refresh_token")
     if not refresh_token:
-        print("❌ No refresh_token in response. Make sure 'prompt=consent' is in the URL.")
-        print(f"Full response: {token_data}")
+        print("❌ No refresh_token returned. Try revoking access at")
+        print("   https://myaccount.google.com/permissions and running again.")
         sys.exit(1)
 
-    print("\n" + "=" * 60)
-    print("✅ SUCCESS! Add these to your .env:\n")
-    print(f"GMAIL_ACCOUNT_X_EMAIL=<the gmail address you just signed in with>")
-    print(f"GMAIL_ACCOUNT_X_REFRESH_TOKEN={refresh_token}")
     print("=" * 60)
+    print("✅ Success! Copy the token below and update your server .env:\n")
+    print(f"GMAIL_ACCOUNT_X_REFRESH_TOKEN={refresh_token}")
+    print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":
