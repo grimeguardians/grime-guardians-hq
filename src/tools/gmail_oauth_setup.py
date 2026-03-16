@@ -31,7 +31,7 @@ settings = get_settings()
 
 SCOPES = " ".join([
     "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
 ])
 AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
