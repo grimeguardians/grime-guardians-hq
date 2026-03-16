@@ -1,342 +1,383 @@
 """
 Dean — Email Outreach Campaign
-Pulls leads from GHL (tagged 'email-outreach') or a CSV fallback,
-sends personalized plain-text emails from two Gmail accounts,
-and tracks sent status to prevent duplicate sends.
+Reads leads from Google Sheets, sends personalized plain-text emails
+from two Gmail accounts, and writes tracking data back to the sheet.
 
-Sequence:
-  Step 1 — Initial outreach
-  Step 2 — Follow-up (sent 7 days after step 1 if no reply tracked)
+Cadence:
+  Day 1  — Initial outreach (status: cold)
+  Day 2  — The Bump (1 day after Day 1, no reply)
+  Day 7  — Door Slam (7 days after Day 1, no reply)
+  Day 8+ — Move to Recycle Bin (status: recycled) — no more emails
+  Day 90+ — Drip reactivation (every 60-90 days for recycled contacts)
 """
 
 import asyncio
-import csv
-import json
 import logging
 import random
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 
 from ..config.settings import get_settings
-from ..integrations.gohighlevel_integration import GoHighLevelIntegration
 from ..integrations.gmail_sender import GmailSender
+from ..integrations.google_sheets import GoogleSheetsClient, SheetContact
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Sent log path — tracks who's been emailed and when
-SENT_LOG_PATH = Path("data/email_sent_log.json")
-# CSV fallback for contacts not in GHL
-CSV_LEADS_PATH = Path("data/email_leads.csv")
-
-# Delay range between sends (seconds) — looks human, avoids bulk flags
+# Delay range between sends (seconds) — human-like pacing
 SEND_DELAY_MIN = 180   # 3 minutes
 SEND_DELAY_MAX = 480   # 8 minutes
 
+# Days between sequence steps (from Day 1 send date)
+BUMP_DAYS = 1       # Day 2: Bump fires 1 day after initial
+DOOR_SLAM_DAYS = 7  # Day 7: Door Slam fires 7 days after initial
+RECYCLE_DAYS = 8    # Day 8: Move to Recycle Bin if still no reply
+DRIP_DAYS = 90      # Day 90+: Reactivation drip for recycled contacts
 
-@dataclass
-class OutreachContact:
-    name: str
-    email: str
-    company: str = ""
-    contact_type: str = "general"  # property_manager | realtor | general
-    ghl_id: str = ""
+
+# ─── Avatar Pain Points (per industry, for drip campaign) ──────────────────────
+
+AVATAR_PAIN: Dict[str, str] = {
+    "property_manager": "vacancies sitting dirty between tenants",
+    "construction": "final inspections held up by a dusty site",
+    "realtor": "listings that aren't photo-ready on shoot day",
+    "real_estate_developer": "flips delayed from hitting the market",
+    "general": "cleaning headaches slowing down your business",
+}
 
 
 # ─── Email Templates ──────────────────────────────────────────────────────────
-# Plain text only. Short. Personalized. No "click here", no images, no links.
-# Subject lines and bodies are tuned to avoid spam filters.
+# Plain text only. No links, no images, no HTML.
+# Lowercase subject lines. Single-dash sign-off.
+# A/B variants per industry — alternated by contact row index.
+# {at_company} renders as " at [Company]" or "" if company unknown.
+# {for_company} renders as " for [Company]" or "" if company unknown.
 
-TEMPLATES: Dict[str, Dict[str, str]] = {
+TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
 
-    "property_manager_intro": {
-        "subject": "Faster unit turnovers — Twin Cities",
-        "body": """\
-Hi {first_name},
+    # ── Day 1: Initial Outreach ──────────────────────────────────────────────
 
-Quick question — what does a slow turnover cost you per unit in lost rent?
-
-We're Grime Guardians, a premium cleaning service in the Twin Cities. We work with property managers to get units show-ready fast after move-out — thorough clean, inside appliances, photo-ready results.
-
-Our B2B rates: Studio $399 | 1bd/1ba $499 | 2bd/2ba $599 | 3bd/2ba $699.
-No contracts. We show up when you need us.
-
-Worth a 10-minute call to see if we're a fit for {company_or_your} portfolio?
-
-— Dean
-Grime Guardians | grimeguardians.com
-To opt out of these emails, reply "unsubscribe".""",
+    "property_manager": {
+        "A": {
+            "subject": "backup vendor{for_company}",
+            "body": "Hey {first_name}, would you be opposed to having a backup cleaning vendor on standby for the next time your main crew no-shows{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "quick question",
+            "body": "Hey {first_name}, are you currently looking to eliminate move-in touch-ups{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
     },
 
-    "realtor_intro": {
-        "subject": "Move-out cleans that get listings photo-ready",
-        "body": """\
-Hi {first_name},
-
-Listings sell faster when they look like they've never been lived in.
-
-I'm Dean with Grime Guardians — we specialize in move-out cleans for Twin Cities realtors. Our Elite Listing Polish ($549–$749) gets properties camera-ready: inside appliances, baseboards, windows, the works.
-
-We've helped agents in Eagan, Edina, and Eden Prairie close faster by eliminating the "it needs a deep clean" buyer objection before it's ever raised.
-
-Is this something you'd want available for your next listing?
-
-— Dean
-Grime Guardians | grimeguardians.com
-To opt out, reply "unsubscribe".""",
+    "construction": {
+        "A": {
+            "subject": "final inspections",
+            "body": "Hey {first_name}, would you be against having a backup cleaning crew on standby for the next time your main team holds up a final inspection?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "walkthroughs{at_company}",
+            "body": "Hey {first_name}, are you currently looking to eliminate final walkthrough dust complaints{at_company}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
     },
 
-    "general_intro": {
-        "subject": "Professional cleaning in {area}",
-        "body": """\
-Hi {first_name},
-
-We're Grime Guardians — a premium cleaning service serving the Twin Cities. BBB-accredited, 70+ five-star Google reviews, fully insured.
-
-For first-time clients we offer an Elite Home Reset: a deep, top-to-bottom clean at a flat rate ($299–$549 depending on size) with no recurring obligation.
-
-Most clients book once to see if we're a fit — then stay for years.
-
-Would you be open to a quick quote?
-
-— Dean
-Grime Guardians | grimeguardians.com
-To opt out, reply "unsubscribe".""",
+    "realtor": {
+        "A": {
+            "subject": "picture day",
+            "body": "Hey {first_name}, would you be opposed to having a backup cleaning crew on standby the next time a listing isn't photo-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "new listings",
+            "body": "Hey {first_name}, are you currently looking to get your new listings photo-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
     },
 
-    "followup": {
-        "subject": "Re: {original_subject}",
-        "body": """\
-Hi {first_name},
+    "real_estate_developer": {
+        "A": {
+            "subject": "delayed flips",
+            "body": "Hey {first_name}, would you be opposed to having a backup turnover crew on standby for the next time your main guys delay a flip hitting the market?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "market-ready",
+            "body": "Hey {first_name}, are you currently looking to get your latest flip market-ready?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+    },
 
-Just circling back on my last note — wanted to make sure it didn't get buried.
+    "general": {
+        "A": {
+            "subject": "quick question",
+            "body": "Hey {first_name}, would you be opposed to having a reliable backup cleaning crew on standby in the Twin Cities?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "twin cities cleaning",
+            "body": "Hey {first_name}, are you currently looking for a reliable cleaning crew in the Twin Cities?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+    },
 
-No pressure at all. If timing isn't right or you're already covered, totally understand. Just reply and I'll take you off my list.
+    # ── Day 2: The Bump ──────────────────────────────────────────────────────
+    # Same subject as Day 1 (re: prefix), floats the thread, under 15 words.
 
-If you've been curious and haven't had a chance to respond — happy to answer any questions or put together a quick quote.
+    "followup_2": {
+        "A": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, just floating this back to the top.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, wanted to make sure this didn't get buried.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+    },
 
-— Dean
-Grime Guardians
-To opt out, reply "unsubscribe".""",
+    # ── Day 7: The Door Slam ─────────────────────────────────────────────────
+    # Takes the offer away. Triggers loss aversion. Closes the loop.
+
+    "followup_3": {
+        "A": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, I'll assume the timing isn't right and take you off my list. If you ever need a reliable crew on short notice, we're here.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, no worries — I won't keep bugging you. If {avatar_pain} ever becomes a problem worth solving, feel free to reach back out.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+    },
+
+    # ── Day 90+: Drip Reactivation ────────────────────────────────────────────
+    # Alternates Value Drop (A) and 9-Word Check-In (B) every 60-90 days.
+
+    "drip": {
+        "A": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, quick update — we've been handling {avatar_pain} for a few clients in the area. If that's ever on your radar, I'd be happy to put together something fast.\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
+        "B": {
+            "subject": "re: {original_subject}",
+            "body": "Hey {first_name}, are you still dealing with {avatar_pain}?\n\n- Dean\nTo opt out, reply \"unsubscribe\"",
+        },
     },
 }
 
 
-def _load_sent_log() -> Dict:
-    """Load the sent log from disk."""
-    if SENT_LOG_PATH.exists():
+def _ab_variant(contact: SheetContact) -> str:
+    """Alternate A/B by row index — even rows get A, odd get B."""
+    return "A" if contact.row_index % 2 == 0 else "B"
+
+
+def _intro_type(contact_type: str) -> str:
+    """Return the template group key, falling back to general."""
+    return contact_type if contact_type in TEMPLATES else "general"
+
+
+def _pick_template_and_step(contact: SheetContact) -> Optional[Tuple[str, str, int]]:
+    """
+    Determine which template group, variant, and step to send.
+
+    Step mapping:
+      1 = Day 1 initial outreach
+      2 = Day 2 bump (1 day after step 1)
+      3 = Day 7 door slam (7 days after step 1)
+      4 = Day 90+ drip (recycled contacts, 90+ days since door slam)
+
+    Returns (template_group, variant, step) or None if nothing to send.
+    """
+    now = datetime.now()
+    variant = _ab_variant(contact)
+    status = contact.status.lower()
+
+    # Step 1 — never emailed, status cold
+    if not contact.email_1_date and status == "cold":
+        return _intro_type(contact.contact_type), variant, 1
+
+    # Parse email_1_date once for steps 2/3/recycle checks
+    day1_sent: Optional[datetime] = None
+    if contact.email_1_date:
         try:
-            return json.loads(SENT_LOG_PATH.read_text())
-        except (json.JSONDecodeError, OSError):
+            day1_sent = datetime.fromisoformat(contact.email_1_date)
+        except ValueError:
             pass
-    return {}
+
+    if day1_sent and not contact.reply_date:
+        days_since_day1 = (now - day1_sent).days
+
+        # Step 2 — Bump (1+ day after step 1, no reply, no bump sent yet)
+        if not contact.email_2_date and days_since_day1 >= BUMP_DAYS:
+            return "followup_2", variant, 2
+
+        # Step 3 — Door Slam (7+ days after step 1, no reply, bump sent, no door slam yet)
+        if contact.email_2_date and not contact.email_3_date and days_since_day1 >= DOOR_SLAM_DAYS:
+            return "followup_3", variant, 3
+
+    # Drip — recycled contacts 90+ days since door slam
+    if status == "recycled" and contact.email_3_date and not contact.reply_date:
+        try:
+            day3_sent = datetime.fromisoformat(contact.email_3_date)
+            if (now - day3_sent).days >= DRIP_DAYS:
+                return "drip", variant, 4
+        except ValueError:
+            pass
+
+    return None
 
 
-def _save_sent_log(log: Dict) -> None:
-    """Persist the sent log to disk."""
-    SENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SENT_LOG_PATH.write_text(json.dumps(log, indent=2, default=str))
-
-
-def _load_csv_contacts() -> List[OutreachContact]:
-    """Load contacts from CSV fallback. Expected columns: name, email, company, contact_type."""
-    if not CSV_LEADS_PATH.exists():
-        return []
-    contacts = []
+def _should_recycle(contact: SheetContact) -> bool:
+    """
+    Returns True if contact should be moved to Recycle Bin.
+    Condition: Day 1 sent 8+ days ago, no reply, door slam sent.
+    """
+    if contact.reply_date or contact.status.lower() == "recycled":
+        return False
+    if not contact.email_3_date:
+        return False
+    if not contact.email_1_date:
+        return False
     try:
-        with open(CSV_LEADS_PATH, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                email = row.get("email", "").strip()
-                if not email:
-                    continue
-                contacts.append(OutreachContact(
-                    name=row.get("name", "").strip(),
-                    email=email.lower(),
-                    company=row.get("company", "").strip(),
-                    contact_type=row.get("contact_type", "general").strip(),
-                ))
-    except Exception as e:
-        logger.error(f"CSV load error: {e}")
-    return contacts
+        day1_sent = datetime.fromisoformat(contact.email_1_date)
+        return (datetime.now() - day1_sent).days >= RECYCLE_DAYS
+    except ValueError:
+        return False
 
 
-def _pick_template(contact: OutreachContact, step: int) -> str:
-    """Select the right template key based on contact type and sequence step."""
-    if step == 2:
-        return "followup"
-    if contact.contact_type == "property_manager":
-        return "property_manager_intro"
-    if contact.contact_type == "realtor":
-        return "realtor_intro"
-    return "general_intro"
-
-
-def _render(template_key: str, contact: OutreachContact) -> tuple[str, str]:
+def _render(template_group: str, variant: str, contact: SheetContact) -> Tuple[str, str]:
     """Render subject + body for a contact. Returns (subject, body)."""
-    t = TEMPLATES[template_key]
+    t = TEMPLATES[template_group][variant]
     first_name = contact.name.split()[0].title() if contact.name else "there"
-    company_or_your = contact.company if contact.company else "your"
 
-    # Determine the intro subject for follow-up threading
-    intro_key = _pick_template(contact, step=1)
-    original_subject = TEMPLATES[intro_key]["subject"].format(
-        first_name=first_name,
-        company_or_your=company_or_your,
-        area="the Twin Cities",
+    # Company tokens — gracefully empty if unknown
+    company = contact.company.strip() if contact.company else ""
+    at_company = f" at {company}" if company else ""
+    for_company = f" for {company}" if company else ""
+
+    # Avatar pain per contact type
+    avatar_pain = AVATAR_PAIN.get(contact.contact_type, AVATAR_PAIN["general"])
+
+    # Original subject for follow-up threading
+    intro_group = _intro_type(contact.contact_type)
+    intro_variant = _ab_variant(contact)
+    original_subject = TEMPLATES[intro_group][intro_variant]["subject"].format(
+        first_name=first_name, at_company=at_company, for_company=for_company
     )
 
     subject = t["subject"].format(
         first_name=first_name,
+        at_company=at_company,
+        for_company=for_company,
         original_subject=original_subject,
-        area="the Twin Cities",
+        avatar_pain=avatar_pain,
     )
     body = t["body"].format(
         first_name=first_name,
-        company_or_your=company_or_your,
-        area="the Twin Cities",
+        at_company=at_company,
+        for_company=for_company,
         original_subject=original_subject,
+        avatar_pain=avatar_pain,
     )
     return subject, body
 
 
 class DeanEmailCampaign:
     """
-    Orchestrates Dean's email outreach. Pulls contacts from GHL or CSV,
-    skips already-emailed contacts, and sends with human-like delays.
+    Orchestrates Dean's email outreach using Google Sheets as source of truth.
+    Reads contacts, sends emails with human-like delays, writes tracking back to sheet.
     """
 
     def __init__(self):
-        accounts = []
+        """Initialize with Gmail accounts and sheet client from settings."""
+        self.sheets = GoogleSheetsClient()
+        self.accounts: List[GmailSender] = []
         if settings.gmail_account_1_email and settings.gmail_account_1_refresh_token:
-            accounts.append(GmailSender(
+            self.accounts.append(GmailSender(
                 email=settings.gmail_account_1_email,
                 refresh_token=settings.gmail_account_1_refresh_token,
             ))
         if settings.gmail_account_2_email and settings.gmail_account_2_refresh_token:
-            accounts.append(GmailSender(
+            self.accounts.append(GmailSender(
                 email=settings.gmail_account_2_email,
                 refresh_token=settings.gmail_account_2_refresh_token,
             ))
-        self.accounts = accounts
         self.daily_limit = settings.email_daily_limit_per_account
-
-    async def _fetch_ghl_contacts(self) -> List[OutreachContact]:
-        """Pull contacts from GHL tagged for email outreach."""
-        contacts = []
-        try:
-            async with GoHighLevelIntegration() as ghl:
-                results = await ghl.search_contacts(query=settings.email_outreach_tag)
-                for c in results:
-                    if not c.email:
-                        continue
-                    ctype = "general"
-                    tags = [t.lower() for t in (c.tags or [])]
-                    if "property-manager" in tags or "property manager" in tags:
-                        ctype = "property_manager"
-                    elif "realtor" in tags or "agent" in tags:
-                        ctype = "realtor"
-                    contacts.append(OutreachContact(
-                        name=c.name or "",
-                        email=c.email.lower(),
-                        company="",
-                        contact_type=ctype,
-                        ghl_id=c.id,
-                    ))
-        except Exception as e:
-            logger.error(f"GHL contact fetch failed: {e}")
-        return contacts
-
-    def _contacts_to_send(
-        self,
-        all_contacts: List[OutreachContact],
-        sent_log: Dict,
-    ) -> List[tuple[OutreachContact, int]]:
-        """
-        Return contacts that should be emailed today and their sequence step.
-        Step 1: Never emailed.
-        Step 2: Step 1 was sent 7+ days ago and no reply recorded.
-        """
-        to_send = []
-        for contact in all_contacts:
-            record = sent_log.get(contact.email)
-            if record is None:
-                to_send.append((contact, 1))
-            elif record.get("sequence_step") == 1 and not record.get("replied"):
-                sent_at = datetime.fromisoformat(record["sent_at"])
-                if datetime.now() - sent_at >= timedelta(days=7):
-                    to_send.append((contact, 2))
-            # step 2 already sent — nothing more to do
-        return to_send
 
     async def run_batch(self) -> Dict[str, int]:
         """
-        Run today's outreach batch. Sends up to daily_limit emails per account,
-        alternating between accounts with random delays.
+        Run today's outreach batch.
+        Sends up to daily_limit emails per account, writes results back to sheet.
+        Also recycles contacts that hit Day 8+ with no reply.
 
         Returns:
-            {"sent": N, "skipped": N, "failed": N}
+            {"sent": N, "skipped": N, "failed": N, "recycled": N}
         """
         if not self.accounts:
             logger.warning("Email campaign: no Gmail accounts configured.")
-            return {"sent": 0, "skipped": 0, "failed": 0}
+            return {"sent": 0, "skipped": 0, "failed": 0, "recycled": 0}
 
-        sent_log = _load_sent_log()
-        ghl_contacts = await self._fetch_ghl_contacts()
-        csv_contacts = _load_csv_contacts()
+        contacts = self.sheets.read_contacts()
+        to_send: List[Tuple[SheetContact, str, str, int]] = []
+        recycled_count = 0
 
-        # Deduplicate by email
-        seen = set()
-        all_contacts = []
-        for c in ghl_contacts + csv_contacts:
-            if c.email not in seen:
-                seen.add(c.email)
-                all_contacts.append(c)
+        for contact in contacts:
+            # Skip contacts that already replied (handled separately)
+            if contact.reply_sentiment.lower() in ("positive", "negative"):
+                continue
 
-        to_send = self._contacts_to_send(all_contacts, sent_log)
-        if not to_send:
-            logger.info("Email campaign: no contacts to send today.")
-            return {"sent": 0, "skipped": len(all_contacts), "failed": 0}
+            # Recycle contacts that hit Day 8 with no reply
+            if _should_recycle(contact):
+                contact.status = "recycled"
+                try:
+                    self.sheets.update_contact(contact)
+                    recycled_count += 1
+                    logger.info(f"Recycled {contact.email} (no reply after door slam)")
+                except Exception as e:
+                    logger.error(f"Sheet recycle failed for {contact.email}: {e}")
+                continue
 
-        # Cap at daily_limit per account total across both accounts
+            result = _pick_template_and_step(contact)
+            if result:
+                template_group, variant, step = result
+                to_send.append((contact, template_group, variant, step))
+
         total_limit = self.daily_limit * len(self.accounts)
         to_send = to_send[:total_limit]
 
-        stats = {"sent": 0, "skipped": 0, "failed": 0}
+        if not to_send:
+            logger.info("Email campaign: no contacts to send today.")
+            return {"sent": 0, "skipped": len(contacts), "failed": 0, "recycled": recycled_count}
+
+        stats: Dict[str, int] = {"sent": 0, "skipped": 0, "failed": 0, "recycled": recycled_count}
         account_counts = {a.email: 0 for a in self.accounts}
 
         async with aiohttp.ClientSession() as session:
-            for i, (contact, step) in enumerate(to_send):
-                # Pick account with fewest sends today, rotating
+            for i, (contact, template_group, variant, step) in enumerate(to_send):
                 sender = min(self.accounts, key=lambda a: account_counts[a.email])
                 if account_counts[sender.email] >= self.daily_limit:
                     stats["skipped"] += 1
                     continue
 
-                template_key = _pick_template(contact, step)
-                subject, body = _render(template_key, contact)
-
+                subject, body = _render(template_group, variant, contact)
                 ok = await sender.send(session, to=contact.email, subject=subject, body=body)
 
                 if ok:
-                    sent_log[contact.email] = {
-                        "sent_at": datetime.now().isoformat(),
-                        "template": template_key,
-                        "account": sender.email,
-                        "sequence_step": step,
-                        "replied": False,
-                    }
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    if step == 1:
+                        contact.email_1_date = now_str
+                        contact.email_1_template = f"{template_group}_{variant}"
+                        contact.status = "contacted"
+                    elif step == 2:
+                        contact.email_2_date = now_str
+                    elif step == 3:
+                        contact.email_3_date = now_str
+                    elif step == 4:
+                        # Drip: update email_3_date to reset the 90-day clock
+                        contact.email_3_date = now_str
+
+                    try:
+                        self.sheets.update_contact(contact)
+                    except Exception as e:
+                        logger.error(f"Sheet write-back failed for {contact.email}: {e}")
+
                     account_counts[sender.email] += 1
                     stats["sent"] += 1
-                    _save_sent_log(sent_log)
                 else:
                     stats["failed"] += 1
 
-                # Human-like delay between sends (skip delay on last send)
                 if i < len(to_send) - 1:
                     delay = random.randint(SEND_DELAY_MIN, SEND_DELAY_MAX)
                     logger.debug(f"Email campaign: waiting {delay}s before next send.")
@@ -344,6 +385,7 @@ class DeanEmailCampaign:
 
         logger.info(
             f"Email campaign complete: {stats['sent']} sent, "
-            f"{stats['skipped']} skipped, {stats['failed']} failed."
+            f"{stats['skipped']} skipped, {stats['failed']} failed, "
+            f"{stats['recycled']} recycled."
         )
         return stats
